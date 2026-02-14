@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Chess.Domain;
@@ -26,6 +27,11 @@ public sealed class GameSessionService : IGameSessionService
     {
         _currentGameState = _gameEngine.CreateInitialGameState();
         return _currentGameState;
+    }
+
+    public IReadOnlyList<Move> GetLegalMovesFrom(Square fromSquare)
+    {
+        return _gameEngine.GenerateLegalMoves(_currentGameState, fromSquare);
     }
 
     public bool TryMakeMove(Square fromSquare, Square toSquare, PieceType? promotionPieceType = null)

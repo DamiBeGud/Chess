@@ -3,13 +3,90 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="clr-namespace:Chess.UI.ViewModels"
-        mc:Ignorable="d" d:DesignWidth="800" d:DesignHeight="450"
+        mc:Ignorable="d" d:DesignWidth="920" d:DesignHeight="760"
         x:Class="Chess.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="{Binding Title}">
-    <StackPanel Margin="24" Spacing="12">
-        <TextBlock Text="Chess Project" FontSize="22" FontWeight="Bold" />
-        <TextBlock Text="{Binding GameSummary}" TextWrapping="Wrap" />
-        <Button Content="Start New Game" Command="{Binding NewGameCommand}" Width="150" />
-    </StackPanel>
+    <Grid Margin="20"
+          RowDefinitions="Auto,Auto,*"
+          ColumnDefinitions="*,Auto"
+          RowSpacing="14"
+          ColumnSpacing="16">
+        <TextBlock Grid.Row="0"
+                   Grid.Column="0"
+                   Text="Chess"
+                   FontSize="28"
+                   FontWeight="Bold" />
+
+        <Button Grid.Row="0"
+                Grid.Column="1"
+                Content="Start New Game"
+                Command="{Binding NewGameCommand}"
+                MinWidth="150"
+                HorizontalAlignment="Right" />
+
+        <StackPanel Grid.Row="1"
+                    Grid.ColumnSpan="2"
+                    Spacing="4">
+            <TextBlock x:Name="GameStatusTextBlock"
+                       Text="{Binding GameStatusText}"
+                       FontSize="17"
+                       FontWeight="SemiBold" />
+            <TextBlock x:Name="LastActionTextBlock"
+                       Text="{Binding LastActionText}"
+                       TextWrapping="Wrap" />
+            <TextBlock x:Name="FeedbackTextBlock"
+                       Text="{Binding FeedbackText}"
+                       TextWrapping="Wrap"
+                       Foreground="#B03030"
+                       FontWeight="SemiBold" />
+        </StackPanel>
+
+        <Border Grid.Row="2"
+                Grid.ColumnSpan="2"
+                HorizontalAlignment="Left"
+                BorderBrush="#2C2C2C"
+                BorderThickness="2"
+                CornerRadius="8"
+                Padding="6">
+            <ItemsControl x:Name="BoardItemsControl"
+                          ItemsSource="{Binding BoardSquares}">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <UniformGrid Rows="8" Columns="8" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:BoardSquareViewModel">
+                        <Button Command="{Binding ClickCommand}"
+                                Classes="board-square"
+                                Tag="{Binding CoordinateLabel}"
+                                Background="{Binding Background}"
+                                BorderThickness="0"
+                                Padding="0"
+                                Width="76"
+                                Height="76"
+                                HorizontalContentAlignment="Center"
+                                VerticalContentAlignment="Center">
+                            <Grid RowDefinitions="*,Auto">
+                                <TextBlock Grid.Row="0"
+                                           Text="{Binding PieceGlyph}"
+                                           FontSize="44"
+                                           FontFamily="Inter, Segoe UI Symbol, Noto Sans Symbols2, DejaVu Sans"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center" />
+                                <TextBlock Grid.Row="1"
+                                           Text="{Binding CoordinateLabel}"
+                                           FontSize="10"
+                                           Margin="3"
+                                           HorizontalAlignment="Right"
+                                           VerticalAlignment="Bottom"
+                                           Opacity="0.55" />
+                            </Grid>
+                        </Button>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </Border>
+    </Grid>
 </Window>

@@ -13,6 +13,32 @@ namespace Chess.Tests;
 public sealed class GameSessionServiceTests
 {
     [Fact]
+    public void GetLegalMovesFrom_ReturnsCurrentSideLegalMoves()
+    {
+        var engine = new ChessGameEngine();
+        var service = new GameSessionService(engine, new InMemoryGameStateStore(engine.CreateInitialGameState()));
+
+        service.StartNewGame();
+        var moves = service.GetLegalMovesFrom(new Square(4, 1));
+
+        Assert.Equal(2, moves.Count);
+        Assert.Contains(moves, move => move.To == new Square(4, 2));
+        Assert.Contains(moves, move => move.To == new Square(4, 3));
+    }
+
+    [Fact]
+    public void GetLegalMovesFrom_ReturnsEmptyForOpponentPiece()
+    {
+        var engine = new ChessGameEngine();
+        var service = new GameSessionService(engine, new InMemoryGameStateStore(engine.CreateInitialGameState()));
+
+        service.StartNewGame();
+        var moves = service.GetLegalMovesFrom(new Square(4, 6));
+
+        Assert.Empty(moves);
+    }
+
+    [Fact]
     public async Task StartNewGame_ResetsStateAfterLoadingAnotherState()
     {
         var engine = new ChessGameEngine();
