@@ -15,9 +15,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     private static readonly IBrush LegalDestinationBrush = Brush.Parse("#88C34A");
     private static readonly IBrush DefaultBorderBrush = Brush.Parse("#4A3322");
     private static readonly IBrush FocusedBorderBrush = Brush.Parse("#1E4ED8");
-    private static readonly IBrush LightCoordinateBrush = Brush.Parse("#4A3322");
-    private static readonly IBrush DarkCoordinateBrush = Brush.Parse("#F6ECDD");
-    private static readonly Thickness DefaultBorderThickness = new(1);
+    private static readonly Thickness DefaultBorderThickness = new(0);
     private static readonly Thickness FocusedBorderThickness = new(3);
 
     private Piece? _piece;
@@ -58,8 +56,6 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     public IBrush BorderBrush => _isKeyboardFocused ? FocusedBorderBrush : DefaultBorderBrush;
 
     public Thickness BorderThickness => _isKeyboardFocused ? FocusedBorderThickness : DefaultBorderThickness;
-
-    public IBrush CoordinateForeground => IsLightSquare ? LightCoordinateBrush : DarkCoordinateBrush;
 
     public string SquareDescription => _piece is null
         ? $"{CoordinateLabel}: empty square"

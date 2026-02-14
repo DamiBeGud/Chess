@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
@@ -19,6 +20,8 @@ namespace Chess.Tests;
 
 public sealed class MainWindowUiIntegrationTests
 {
+    private const double LayoutTolerance = 6d;
+
     [AvaloniaFact]
     public void MainWindow_RendersBoardAndInitialStatus()
     {
@@ -392,6 +395,81 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public void BoardLayout_RemainsSquareWithSquareCells_DuringResize()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            foreach (var (width, height) in new[] { (580d, 920d), (1024d, 640d), (760d, 760d) })
+            {
+                ResizeWindow(window, width, height);
+
+                var boardButtons = GetBoardSquareButtons(window);
+                var boardBounds = GetAggregateBounds(boardButtons, window);
+                Assert.InRange(Math.Abs(boardBounds.Width - boardBounds.Height), 0d, 0.75d);
+
+                foreach (var boardButton in boardButtons)
+                {
+                    var bounds = GetBoundsRelativeToWindow(boardButton, window);
+                    Assert.InRange(Math.Abs(bounds.Width - bounds.Height), 0d, 0.75d);
+                }
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void BoardLayout_ShowsEdgeCoordinates_InStandardOrientation()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+
+            var fileLabels = GetOrderedEdgeLabels(window, "FileCoordinatesItemsControl", sortByHorizontalAxis: true);
+            var rankLabels = GetOrderedEdgeLabels(window, "RankCoordinatesItemsControl", sortByHorizontalAxis: false);
+
+            Assert.Equal(new[] { "a", "b", "c", "d", "e", "f", "g", "h" }, fileLabels);
+            Assert.Equal(new[] { "8", "7", "6", "5", "4", "3", "2", "1" }, rankLabels);
+            AssertEdgeCoordinatesAdjacentToBoard(window);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void BoardLayout_HasNoInterCellGaps_DuringResize()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            foreach (var (width, height) in new[] { (600d, 900d), (980d, 620d), (680d, 680d) })
+            {
+                ResizeWindow(window, width, height);
+                AssertNoInterCellGaps(window);
+            }
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void FinishedGameState_ShowsResultAndBlocksMoveInteraction()
     {
         var finishedState = new GameState(
@@ -510,6 +588,131 @@ public sealed class MainWindowUiIntegrationTests
         return key == Key.Space ? " " : string.Empty;
     }
 
+    private static void ResizeWindow(Window window, double width, double height)
+    {
+        window.Width = width;
+        window.Height = height;
+        window.UpdateLayout();
+    }
+
+    private static Rect GetBoundsRelativeToWindow(Control control, Window window)
+    {
+        var topLeft = control.TranslatePoint(new Point(0, 0), window);
+        var bottomRight = control.TranslatePoint(
+            new Point(control.Bounds.Width, control.Bounds.Height),
+            window);
+
+        Assert.True(topLeft.HasValue);
+        Assert.True(bottomRight.HasValue);
+
+        var x = topLeft!.Value.X;
+        var y = topLeft.Value.Y;
+        var width = bottomRight!.Value.X - x;
+        var height = bottomRight.Value.Y - y;
+
+        return new Rect(x, y, width, height);
+    }
+
+    private static Rect GetAggregateBounds(IEnumerable<Control> controls, Window window)
+    {
+        var bounds = controls.Select(control => GetBoundsRelativeToWindow(control, window)).ToArray();
+        Assert.NotEmpty(bounds);
+
+        var minX = bounds.Min(rect => rect.X);
+        var minY = bounds.Min(rect => rect.Y);
+        var maxX = bounds.Max(rect => rect.Right);
+        var maxY = bounds.Max(rect => rect.Bottom);
+        return new Rect(minX, minY, maxX - minX, maxY - minY);
+    }
+
+    private static IReadOnlyList<string> GetOrderedEdgeLabels(Window window, string itemsControlName, bool sortByHorizontalAxis)
+    {
+        var itemsControl = window.FindControl<ItemsControl>(itemsControlName);
+        Assert.NotNull(itemsControl);
+
+        var labels = itemsControl!.GetVisualDescendants()
+            .OfType<TextBlock>()
+            .Where(textBlock => !string.IsNullOrWhiteSpace(textBlock.Text))
+            .Select(textBlock =>
+            {
+                var topLeft = textBlock.TranslatePoint(new Point(0, 0), window);
+                Assert.True(topLeft.HasValue);
+                return new LabelSnapshot(textBlock.Text!, topLeft!.Value.X, topLeft.Value.Y);
+            })
+            .OrderBy(label => sortByHorizontalAxis ? label.X : label.Y)
+            .Select(label => label.Text)
+            .ToArray();
+
+        return labels;
+    }
+
+    private static void AssertEdgeCoordinatesAdjacentToBoard(Window window)
+    {
+        var boardItemsControl = window.FindControl<ItemsControl>("BoardItemsControl");
+        var fileCoordinatesItemsControl = window.FindControl<ItemsControl>("FileCoordinatesItemsControl");
+        var rankCoordinatesItemsControl = window.FindControl<ItemsControl>("RankCoordinatesItemsControl");
+
+        Assert.NotNull(boardItemsControl);
+        Assert.NotNull(fileCoordinatesItemsControl);
+        Assert.NotNull(rankCoordinatesItemsControl);
+
+        var boardBounds = GetBoundsRelativeToWindow(boardItemsControl!, window);
+        var fileBounds = GetBoundsRelativeToWindow(fileCoordinatesItemsControl!, window);
+        var rankBounds = GetBoundsRelativeToWindow(rankCoordinatesItemsControl!, window);
+
+        var rankToBoardGap = boardBounds.Left - rankBounds.Right;
+        var boardToFileGap = fileBounds.Top - boardBounds.Bottom;
+
+        Assert.InRange(rankToBoardGap, 0d, LayoutTolerance);
+        Assert.InRange(boardToFileGap, 0d, LayoutTolerance);
+        Assert.InRange(Math.Abs(rankBounds.Top - boardBounds.Top), 0d, LayoutTolerance);
+        Assert.InRange(Math.Abs(rankBounds.Bottom - boardBounds.Bottom), 0d, LayoutTolerance);
+        Assert.InRange(Math.Abs(fileBounds.Left - boardBounds.Left), 0d, LayoutTolerance);
+        Assert.InRange(Math.Abs(fileBounds.Right - boardBounds.Right), 0d, LayoutTolerance);
+    }
+
+    private static void AssertNoInterCellGaps(Window window)
+    {
+        var squareBoundsByCoordinate = GetBoardSquareButtons(window)
+            .ToDictionary(
+                button => button.Tag?.ToString() ?? string.Empty,
+                button => GetBoundsRelativeToWindow(button, window),
+                StringComparer.OrdinalIgnoreCase);
+
+        Assert.Equal(64, squareBoundsByCoordinate.Count);
+
+        for (var rank = 1; rank <= 8; rank++)
+        {
+            for (var file = 0; file < 7; file++)
+            {
+                var leftCoordinate = ToCoordinate(file, rank);
+                var rightCoordinate = ToCoordinate(file + 1, rank);
+                var left = squareBoundsByCoordinate[leftCoordinate];
+                var right = squareBoundsByCoordinate[rightCoordinate];
+                var horizontalGap = right.X - left.Right;
+                Assert.InRange(Math.Abs(horizontalGap), 0d, 0.75d);
+            }
+        }
+
+        for (var rank = 1; rank < 8; rank++)
+        {
+            for (var file = 0; file < 8; file++)
+            {
+                var lowerCoordinate = ToCoordinate(file, rank);
+                var upperCoordinate = ToCoordinate(file, rank + 1);
+                var lower = squareBoundsByCoordinate[lowerCoordinate];
+                var upper = squareBoundsByCoordinate[upperCoordinate];
+                var verticalGap = lower.Y - upper.Bottom;
+                Assert.InRange(Math.Abs(verticalGap), 0d, 0.75d);
+            }
+        }
+    }
+
+    private static string ToCoordinate(int file, int rank)
+    {
+        return $"{(char)('a' + file)}{rank}";
+    }
+
     private static string GetGameStatusText(Window window)
     {
         var textBlock = window.FindControl<TextBlock>("GameStatusTextBlock");
@@ -533,6 +736,8 @@ public sealed class MainWindowUiIntegrationTests
         var textBlock = window.FindControl<TextBlock>("FocusedSquareTextBlock");
         return textBlock?.Text ?? string.Empty;
     }
+
+    private readonly record struct LabelSnapshot(string Text, double X, double Y);
 
     private sealed class StubGameSessionService : IGameSessionService
     {

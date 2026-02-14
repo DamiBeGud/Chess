@@ -15,6 +15,8 @@ namespace Chess.UI.ViewModels;
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
     private static readonly Square DefaultKeyboardFocusSquare = new(4, 1);
+    private static readonly IReadOnlyList<string> DefaultFileCoordinates = BuildFileCoordinates();
+    private static readonly IReadOnlyList<string> DefaultRankCoordinates = BuildRankCoordinates();
 
     private readonly IGameSessionService _gameSessionService;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
@@ -43,6 +45,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     public string Title => "Chess";
 
     public IReadOnlyList<BoardSquareViewModel> BoardSquares => _boardSquares;
+
+    public IReadOnlyList<string> FileCoordinates => DefaultFileCoordinates;
+
+    public IReadOnlyList<string> RankCoordinates => DefaultRankCoordinates;
 
     public string GameStatusText
     {
@@ -366,6 +372,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             GameStatus.Draw => "Status: Draw.",
             _ => $"Status: {gameState.Status}."
         };
+    }
+
+    private static IReadOnlyList<string> BuildFileCoordinates()
+    {
+        return Enumerable.Range(0, 8)
+            .Select(file => ((char)('a' + file)).ToString())
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> BuildRankCoordinates()
+    {
+        return Enumerable.Range(0, 8)
+            .Select(offset => (8 - offset).ToString())
+            .ToArray();
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

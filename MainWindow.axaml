@@ -54,52 +54,108 @@
         <Border Grid.Row="2"
                 Grid.ColumnSpan="2"
                 HorizontalAlignment="Left"
-                BorderBrush="#2C2C2C"
-                BorderThickness="2"
-                CornerRadius="8"
-                Padding="6">
-                <ItemsControl x:Name="BoardItemsControl"
-                          ItemsSource="{Binding BoardSquares}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Rows="8" Columns="8" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate x:DataType="vm:BoardSquareViewModel">
-                        <Button Command="{Binding ClickCommand}"
-                                Classes="board-square"
-                                Tag="{Binding CoordinateLabel}"
-                                Background="{Binding Background}"
-                                BorderBrush="{Binding BorderBrush}"
-                                BorderThickness="{Binding BorderThickness}"
-                                ToolTip.Tip="{Binding SquareDescription}"
-                                CornerRadius="5"
-                                Padding="0"
-                                Width="84"
-                                Height="84"
-                                HorizontalContentAlignment="Center"
-                                VerticalContentAlignment="Center">
-                            <Grid RowDefinitions="*,Auto">
-                                <TextBlock Grid.Row="0"
-                                           Text="{Binding PieceGlyph}"
-                                           FontSize="46"
-                                           FontFamily="Inter, Segoe UI Symbol, Noto Sans Symbols2, DejaVu Sans"
+                VerticalAlignment="Top"
+                Padding="0">
+            <Viewbox Stretch="Uniform"
+                     StretchDirection="Both"
+                     HorizontalAlignment="Left"
+                     VerticalAlignment="Top">
+                <Grid Width="736"
+                      Height="736"
+                      UseLayoutRounding="True"
+                      RowDefinitions="*,40"
+                      ColumnDefinitions="40,*"
+                      RowSpacing="0"
+                      ColumnSpacing="0">
+                    <ItemsControl x:Name="RankCoordinatesItemsControl"
+                                  Grid.Row="0"
+                                  Grid.Column="0"
+                                  ItemsSource="{Binding RankCoordinates}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="8" Columns="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <TextBlock Text="{Binding .}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
                                            HorizontalAlignment="Center"
-                                           VerticalAlignment="Center" />
-                                <TextBlock Grid.Row="1"
-                                           Text="{Binding CoordinateLabel}"
-                                           Foreground="{Binding CoordinateForeground}"
-                                           FontSize="10"
-                                           Margin="3"
-                                           HorizontalAlignment="Right"
-                                           VerticalAlignment="Bottom"
-                                           Opacity="0.55" />
-                            </Grid>
-                        </Button>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                                           VerticalAlignment="Center"
+                                           Foreground="#4A3322"
+                                           Opacity="0.85" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+
+                    <Border Grid.Row="0"
+                            Grid.Column="1"
+                            BorderBrush="#2C2C2C"
+                            BorderThickness="2"
+                            CornerRadius="0"
+                            Padding="0"
+                            ClipToBounds="True">
+                        <ItemsControl x:Name="BoardItemsControl"
+                                      ItemsSource="{Binding BoardSquares}"
+                                      UseLayoutRounding="True">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <UniformGrid Rows="8" Columns="8" />
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:BoardSquareViewModel">
+                                    <Button Command="{Binding ClickCommand}"
+                                            Classes="board-square"
+                                            Tag="{Binding CoordinateLabel}"
+                                            Background="{Binding Background}"
+                                            BorderBrush="{Binding BorderBrush}"
+                                            BorderThickness="{Binding BorderThickness}"
+                                            ToolTip.Tip="{Binding SquareDescription}"
+                                            CornerRadius="0"
+                                            Padding="0"
+                                            Margin="0"
+                                            MinWidth="0"
+                                            MinHeight="0"
+                                            HorizontalAlignment="Stretch"
+                                            VerticalAlignment="Stretch"
+                                            HorizontalContentAlignment="Center"
+                                            VerticalContentAlignment="Center">
+                                        <TextBlock Text="{Binding PieceGlyph}"
+                                                   FontSize="46"
+                                                   FontFamily="Inter, Segoe UI Symbol, Noto Sans Symbols2, DejaVu Sans"
+                                                   HorizontalAlignment="Center"
+                                                   VerticalAlignment="Center" />
+                                    </Button>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </Border>
+
+                    <ItemsControl x:Name="FileCoordinatesItemsControl"
+                                  Grid.Row="1"
+                                  Grid.Column="1"
+                                  ItemsSource="{Binding FileCoordinates}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" Columns="8" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="x:String">
+                                <TextBlock Text="{Binding .}"
+                                           FontSize="17"
+                                           FontWeight="SemiBold"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           Foreground="#4A3322"
+                                           Opacity="0.85" />
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Viewbox>
         </Border>
     </Grid>
 </Window>
