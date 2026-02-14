@@ -36,6 +36,14 @@ public sealed class ChessGameEngine : IGameEngine
         (-1, 0), (1, 0), (0, -1), (0, 1)
     ];
 
+    private static readonly PieceType[] PromotionPieceTypes =
+    [
+        PieceType.Queen,
+        PieceType.Rook,
+        PieceType.Bishop,
+        PieceType.Knight
+    ];
+
     public GameState CreateInitialGameState()
     {
         return InitialPositionBuilder.CreateInitialState();
@@ -51,7 +59,7 @@ public sealed class ChessGameEngine : IGameEngine
             return [];
         }
 
-        return GeneratePseudoLegalMovesForPiece(board, fromSquare, piece);
+        return GeneratePseudoLegalMovesForPiece(gameState, board, fromSquare, piece);
     }
 
     public IReadOnlyList<Move> GenerateLegalMoves(GameState gameState, Square fromSquare)
@@ -64,7 +72,7 @@ public sealed class ChessGameEngine : IGameEngine
             return [];
         }
 
-        return GenerateLegalMovesForPiece(board, fromSquare, piece);
+        return GenerateLegalMovesForPiece(gameState, board, fromSquare, piece);
     }
 
     public IReadOnlyList<Move> GenerateLegalMoves(GameState gameState)
@@ -80,7 +88,7 @@ public sealed class ChessGameEngine : IGameEngine
                 continue;
             }
 
-            legalMoves.AddRange(GenerateLegalMovesForPiece(board, placement.Square, placement.Piece));
+            legalMoves.AddRange(GenerateLegalMovesForPiece(gameState, board, placement.Square, placement.Piece));
         }
 
         return legalMoves;
@@ -88,8 +96,13 @@ public sealed class ChessGameEngine : IGameEngine
 
     public bool IsMoveLegal(GameState gameState, Square fromSquare, Square toSquare, PieceType? promotionPieceType = null)
     {
+        ArgumentNullException.ThrowIfNull(gameState);
+        var board = BuildBoard(gameState);
+        board.TryGetValue(fromSquare, out var movingPiece);
+        var resolvedPromotionPieceType = ResolvePromotionPieceType(movingPiece, toSquare, promotionPieceType);
+
         return GenerateLegalMoves(gameState, fromSquare)
-            .Any(move => move.To == toSquare && move.PromotionPieceType == promotionPieceType);
+            .Any(move => move.To == toSquare && move.PromotionPieceType == resolvedPromotionPieceType);
     }
 
     public bool TryApplyMove(
@@ -107,8 +120,12 @@ public sealed class ChessGameEngine : IGameEngine
             return false;
         }
 
+        var board = BuildBoard(gameState);
+        board.TryGetValue(fromSquare, out var movingPiece);
+        var resolvedPromotionPieceType = ResolvePromotionPieceType(movingPiece, toSquare, promotionPieceType);
+
         Move? legalMove = GenerateLegalMoves(gameState, fromSquare)
-            .FirstOrDefault(move => move.To == toSquare && move.PromotionPieceType == promotionPieceType);
+            .FirstOrDefault(move => move.To == toSquare && move.PromotionPieceType == resolvedPromotionPieceType);
 
         if (legalMove is null)
         {
@@ -129,11 +146,12 @@ public sealed class ChessGameEngine : IGameEngine
     }
 
     private static IReadOnlyList<Move> GenerateLegalMovesForPiece(
+        GameState gameState,
         IReadOnlyDictionary<Square, Piece> board,
         Square fromSquare,
         Piece piece)
     {
-        var pseudoMoves = GeneratePseudoLegalMovesForPiece(board, fromSquare, piece);
+        var pseudoMoves = GeneratePseudoLegalMovesForPiece(gameState, board, fromSquare, piece);
         var legalMoves = new List<Move>(pseudoMoves.Count);
 
         foreach (var move in pseudoMoves)
@@ -148,6 +166,7 @@ public sealed class ChessGameEngine : IGameEngine
     }
 
     private static IReadOnlyList<Move> GeneratePseudoLegalMovesForPiece(
+        GameState gameState,
         IReadOnlyDictionary<Square, Piece> board,
         Square fromSquare,
         Piece piece)
@@ -157,7 +176,7 @@ public sealed class ChessGameEngine : IGameEngine
         switch (piece.Type)
         {
             case PieceType.Pawn:
-                AddPawnMoves(board, moves, fromSquare, piece);
+                AddPawnMoves(gameState, board, moves, fromSquare, piece);
                 break;
             case PieceType.Knight:
                 AddJumpingMoves(board, moves, fromSquare, piece, KnightOffsets);
@@ -173,6 +192,7 @@ public sealed class ChessGameEngine : IGameEngine
                 break;
             case PieceType.King:
                 AddJumpingMoves(board, moves, fromSquare, piece, KingOffsets);
+                AddCastlingMoves(gameState, board, moves, fromSquare, piece);
                 break;
             default:
                 throw new ArgumentOutOfRangeException();
@@ -182,6 +202,7 @@ public sealed class ChessGameEngine : IGameEngine
     }
 
     private static void AddPawnMoves(
+        GameState gameState,
         IReadOnlyDictionary<Square, Piece> board,
         ICollection<Move> moves,
         Square fromSquare,
@@ -196,7 +217,7 @@ public sealed class ChessGameEngine : IGameEngine
             var oneForward = new Square(fromSquare.File, nextRank);
             if (!board.ContainsKey(oneForward))
             {
-                moves.Add(new Move(fromSquare, oneForward, pawn));
+                AddPawnMove(moves, fromSquare, oneForward, pawn);
 
                 var twoForwardRank = fromSquare.Rank + (2 * direction);
                 if (fromSquare.Rank == startRank && IsWithinBoard(fromSquare.File, twoForwardRank))
@@ -223,14 +244,158 @@ public sealed class ChessGameEngine : IGameEngine
             var targetSquare = new Square(targetFile, targetRank);
             if (!board.TryGetValue(targetSquare, out var targetPiece))
             {
+                if (gameState.EnPassantTarget is null || gameState.EnPassantTarget.Value != targetSquare)
+                {
+                    continue;
+                }
+
+                var capturedPawnSquare = new Square(targetFile, fromSquare.Rank);
+                if (!board.TryGetValue(capturedPawnSquare, out var enPassantPawn))
+                {
+                    continue;
+                }
+
+                if (enPassantPawn.Type != PieceType.Pawn || enPassantPawn.Color == pawn.Color)
+                {
+                    continue;
+                }
+
+                AddPawnMove(moves, fromSquare, targetSquare, pawn, enPassantPawn, isEnPassant: true);
                 continue;
             }
 
             if (targetPiece.Color != pawn.Color && targetPiece.Type != PieceType.King)
             {
-                moves.Add(new Move(fromSquare, targetSquare, pawn, targetPiece));
+                AddPawnMove(moves, fromSquare, targetSquare, pawn, targetPiece);
             }
         }
+    }
+
+    private static void AddPawnMove(
+        ICollection<Move> moves,
+        Square fromSquare,
+        Square toSquare,
+        Piece pawn,
+        Piece? capturedPiece = null,
+        bool isEnPassant = false)
+    {
+        if (IsPromotionRank(pawn.Color, toSquare.Rank))
+        {
+            foreach (var promotionPieceType in PromotionPieceTypes)
+            {
+                moves.Add(new Move(
+                    fromSquare,
+                    toSquare,
+                    pawn,
+                    capturedPiece,
+                    IsEnPassant: isEnPassant,
+                    PromotionPieceType: promotionPieceType));
+            }
+
+            return;
+        }
+
+        moves.Add(new Move(
+            fromSquare,
+            toSquare,
+            pawn,
+            capturedPiece,
+            IsEnPassant: isEnPassant));
+    }
+
+    private static void AddCastlingMoves(
+        GameState gameState,
+        IReadOnlyDictionary<Square, Piece> board,
+        ICollection<Move> moves,
+        Square fromSquare,
+        Piece king)
+    {
+        if (king.HasMoved)
+        {
+            return;
+        }
+
+        var homeRank = king.Color == PieceColor.White ? 0 : 7;
+        var kingStartSquare = new Square(4, homeRank);
+        if (fromSquare != kingStartSquare)
+        {
+            return;
+        }
+
+        var opponentColor = GetOpponentColor(king.Color);
+        if (IsSquareAttacked(board, kingStartSquare, opponentColor))
+        {
+            return;
+        }
+
+        if (HasCastlingRight(gameState.CastlingRights, king.Color, isKingSide: true)
+            && CanCastle(board, king.Color, homeRank, isKingSide: true))
+        {
+            moves.Add(new Move(fromSquare, new Square(6, homeRank), king, IsCastling: true));
+        }
+
+        if (HasCastlingRight(gameState.CastlingRights, king.Color, isKingSide: false)
+            && CanCastle(board, king.Color, homeRank, isKingSide: false))
+        {
+            moves.Add(new Move(fromSquare, new Square(2, homeRank), king, IsCastling: true));
+        }
+    }
+
+    private static bool HasCastlingRight(CastlingRights castlingRights, PieceColor color, bool isKingSide)
+    {
+        var requiredRight = (color, isKingSide) switch
+        {
+            (PieceColor.White, true) => CastlingRights.WhiteKingSide,
+            (PieceColor.White, false) => CastlingRights.WhiteQueenSide,
+            (PieceColor.Black, true) => CastlingRights.BlackKingSide,
+            (PieceColor.Black, false) => CastlingRights.BlackQueenSide,
+            _ => CastlingRights.None
+        };
+
+        return (castlingRights & requiredRight) != 0;
+    }
+
+    private static bool CanCastle(
+        IReadOnlyDictionary<Square, Piece> board,
+        PieceColor kingColor,
+        int homeRank,
+        bool isKingSide)
+    {
+        var rookFromSquare = new Square(isKingSide ? 7 : 0, homeRank);
+        if (!board.TryGetValue(rookFromSquare, out var rook)
+            || rook.Type != PieceType.Rook
+            || rook.Color != kingColor
+            || rook.HasMoved)
+        {
+            return false;
+        }
+
+        var betweenSquares = isKingSide
+            ? new[] { new Square(5, homeRank), new Square(6, homeRank) }
+            : new[] { new Square(1, homeRank), new Square(2, homeRank), new Square(3, homeRank) };
+
+        foreach (var square in betweenSquares)
+        {
+            if (board.ContainsKey(square))
+            {
+                return false;
+            }
+        }
+
+        var opponentColor = GetOpponentColor(kingColor);
+        var transitSquares = isKingSide
+            ? new[] { new Square(5, homeRank), new Square(6, homeRank) }
+            : new[] { new Square(3, homeRank), new Square(2, homeRank) };
+
+        foreach (var square in transitSquares)
+        {
+            if (IsSquareAttacked(board, square, opponentColor))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     private static void AddJumpingMoves(
@@ -325,9 +490,61 @@ public sealed class ChessGameEngine : IGameEngine
     {
         var updatedBoard = new Dictionary<Square, Piece>(board);
         updatedBoard.Remove(move.From);
-        updatedBoard.Remove(move.To);
-        updatedBoard[move.To] = move.MovedPiece with { HasMoved = true };
+
+        if (move.IsEnPassant)
+        {
+            var capturedPawnSquare = new Square(move.To.File, move.From.Rank);
+            updatedBoard.Remove(capturedPawnSquare);
+        }
+        else
+        {
+            updatedBoard.Remove(move.To);
+        }
+
+        var movedPieceAfterMove = BuildMovedPieceAfterMove(move);
+        updatedBoard[move.To] = movedPieceAfterMove;
+
+        if (move.IsCastling)
+        {
+            MoveRookForCastling(updatedBoard, move, movedPieceAfterMove.Color);
+        }
+
         return updatedBoard;
+    }
+
+    private static void MoveRookForCastling(
+        IDictionary<Square, Piece> board,
+        Move move,
+        PieceColor kingColor)
+    {
+        var homeRank = move.From.Rank;
+        Square rookFromSquare;
+        Square rookToSquare;
+
+        if (move.To.File == 6)
+        {
+            rookFromSquare = new Square(7, homeRank);
+            rookToSquare = new Square(5, homeRank);
+        }
+        else if (move.To.File == 2)
+        {
+            rookFromSquare = new Square(0, homeRank);
+            rookToSquare = new Square(3, homeRank);
+        }
+        else
+        {
+            throw new InvalidOperationException("Invalid castling destination square.");
+        }
+
+        if (!board.TryGetValue(rookFromSquare, out var rook)
+            || rook.Type != PieceType.Rook
+            || rook.Color != kingColor)
+        {
+            throw new InvalidOperationException("Invalid castling move: expected rook not found.");
+        }
+
+        board.Remove(rookFromSquare);
+        board[rookToSquare] = rook with { HasMoved = true };
     }
 
     private static bool IsSquareAttacked(
@@ -455,11 +672,8 @@ public sealed class ChessGameEngine : IGameEngine
     private static GameState BuildNextGameState(GameState currentState, Move legalMove)
     {
         var board = BuildBoard(currentState);
-        board.Remove(legalMove.From);
-        board.Remove(legalMove.To);
-
-        var movedPieceAfterMove = legalMove.MovedPiece with { HasMoved = true };
-        board[legalMove.To] = movedPieceAfterMove;
+        var boardAfterMove = ApplyMoveOnBoard(board, legalMove);
+        var movedPieceAfterMove = BuildMovedPieceAfterMove(legalMove);
 
         var moveHistory = currentState.MoveHistory.ToList();
         moveHistory.Add(legalMove with { MovedPiece = movedPieceAfterMove });
@@ -472,15 +686,122 @@ public sealed class ChessGameEngine : IGameEngine
             ? currentState.FullmoveNumber + 1
             : currentState.FullmoveNumber;
 
+        var updatedCastlingRights = UpdateCastlingRights(currentState.CastlingRights, legalMove);
+        var enPassantTarget = DetermineEnPassantTarget(legalMove);
+
         return currentState with
         {
-            Pieces = ToPlacements(board),
+            Pieces = ToPlacements(boardAfterMove),
             SideToMove = GetOpponentColor(currentState.SideToMove),
             HalfmoveClock = halfmoveClock,
             FullmoveNumber = fullmoveNumber,
-            EnPassantTarget = null,
+            CastlingRights = updatedCastlingRights,
+            EnPassantTarget = enPassantTarget,
             MoveHistory = moveHistory
         };
+    }
+
+    private static Piece BuildMovedPieceAfterMove(Move move)
+    {
+        if (move.PromotionPieceType is PieceType promotionPieceType)
+        {
+            return new Piece(promotionPieceType, move.MovedPiece.Color, HasMoved: true);
+        }
+
+        return move.MovedPiece with { HasMoved = true };
+    }
+
+    private static CastlingRights UpdateCastlingRights(CastlingRights currentRights, Move move)
+    {
+        var updatedRights = currentRights;
+
+        if (move.MovedPiece.Type == PieceType.King)
+        {
+            updatedRights = move.MovedPiece.Color == PieceColor.White
+                ? updatedRights & ~(CastlingRights.WhiteKingSide | CastlingRights.WhiteQueenSide)
+                : updatedRights & ~(CastlingRights.BlackKingSide | CastlingRights.BlackQueenSide);
+        }
+
+        if (move.MovedPiece.Type == PieceType.Rook)
+        {
+            updatedRights = RemoveCastlingRightForRookSquare(updatedRights, move.MovedPiece.Color, move.From);
+        }
+
+        if (move.CapturedPiece is { Type: PieceType.Rook } capturedRook && !move.IsEnPassant)
+        {
+            updatedRights = RemoveCastlingRightForRookSquare(updatedRights, capturedRook.Color, move.To);
+        }
+
+        return updatedRights;
+    }
+
+    private static CastlingRights RemoveCastlingRightForRookSquare(
+        CastlingRights currentRights,
+        PieceColor rookColor,
+        Square rookSquare)
+    {
+        if (rookColor == PieceColor.White)
+        {
+            if (rookSquare == new Square(0, 0))
+            {
+                return currentRights & ~CastlingRights.WhiteQueenSide;
+            }
+
+            if (rookSquare == new Square(7, 0))
+            {
+                return currentRights & ~CastlingRights.WhiteKingSide;
+            }
+        }
+        else
+        {
+            if (rookSquare == new Square(0, 7))
+            {
+                return currentRights & ~CastlingRights.BlackQueenSide;
+            }
+
+            if (rookSquare == new Square(7, 7))
+            {
+                return currentRights & ~CastlingRights.BlackKingSide;
+            }
+        }
+
+        return currentRights;
+    }
+
+    private static Square? DetermineEnPassantTarget(Move move)
+    {
+        if (move.MovedPiece.Type != PieceType.Pawn)
+        {
+            return null;
+        }
+
+        if (Math.Abs(move.To.Rank - move.From.Rank) != 2)
+        {
+            return null;
+        }
+
+        var midRank = (move.From.Rank + move.To.Rank) / 2;
+        return new Square(move.From.File, midRank);
+    }
+
+    private static PieceType? ResolvePromotionPieceType(Piece? movingPiece, Square toSquare, PieceType? promotionPieceType)
+    {
+        if (movingPiece is null || movingPiece.Type != PieceType.Pawn)
+        {
+            return promotionPieceType;
+        }
+
+        if (!IsPromotionRank(movingPiece.Color, toSquare.Rank))
+        {
+            return promotionPieceType;
+        }
+
+        return promotionPieceType ?? PieceType.Queen;
+    }
+
+    private static bool IsPromotionRank(PieceColor color, int rank)
+    {
+        return (color == PieceColor.White && rank == 7) || (color == PieceColor.Black && rank == 0);
     }
 
     private static IReadOnlyList<PiecePlacement> ToPlacements(IReadOnlyDictionary<Square, Piece> board)

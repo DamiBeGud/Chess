@@ -106,6 +106,70 @@ public sealed class SaveLoadRoundTripTests
         }
     }
 
+    [Fact]
+    public async Task SaveAndLoad_AfterSpecialMoveSequence_PreservesEquivalentContinuation()
+    {
+        var engine = new ChessGameEngine();
+        var store = new JsonGameStateStore();
+
+        var state = new GameState(
+            Pieces:
+            [
+                new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+                new PiecePlacement(new Square(7, 0), new Piece(PieceType.Rook, PieceColor.White)),
+                new PiecePlacement(new Square(4, 4), new Piece(PieceType.Pawn, PieceColor.White)),
+                new PiecePlacement(new Square(0, 6), new Piece(PieceType.Pawn, PieceColor.White)),
+                new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)),
+                new PiecePlacement(new Square(3, 6), new Piece(PieceType.Pawn, PieceColor.Black))
+            ],
+            SideToMove: PieceColor.White,
+            CastlingRights: CastlingRights.WhiteKingSide,
+            EnPassantTarget: null,
+            HalfmoveClock: 0,
+            FullmoveNumber: 1,
+            Status: GameStatus.InProgress,
+            MoveHistory: []);
+
+        Assert.True(engine.TryApplyMove(state, new Square(4, 0), new Square(6, 0), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(3, 6), new Square(3, 4), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(4, 4), new Square(3, 5), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(4, 7), new Square(3, 7), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(0, 6), new Square(0, 7), out var expected));
+
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            await store.SaveAsync(filePath, expected);
+            var loaded = await store.LoadAsync(filePath);
+
+            Assert.Equal(expected.CastlingRights, loaded.CastlingRights);
+            Assert.Equal(expected.EnPassantTarget, loaded.EnPassantTarget);
+            Assert.Equal(expected.SideToMove, loaded.SideToMove);
+            Assert.Equal(expected.HalfmoveClock, loaded.HalfmoveClock);
+            Assert.Equal(expected.FullmoveNumber, loaded.FullmoveNumber);
+            Assert.Equal(expected.Status, loaded.Status);
+            Assert.Equal(expected.SchemaVersion, loaded.SchemaVersion);
+            Assert.Equal(NormalizePieces(expected.Pieces), NormalizePieces(loaded.Pieces));
+            Assert.Equal(NormalizeMoves(expected.MoveHistory), NormalizeMoves(loaded.MoveHistory));
+
+            var expectedLegalMoves = NormalizeMoves(engine.GenerateLegalMoves(expected))
+                .OrderBy(move => move)
+                .ToArray();
+            var loadedLegalMoves = NormalizeMoves(engine.GenerateLegalMoves(loaded))
+                .OrderBy(move => move)
+                .ToArray();
+            Assert.Equal(expectedLegalMoves, loadedLegalMoves);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
     private static IReadOnlyList<string> NormalizePieces(IReadOnlyList<PiecePlacement> pieces)
     {
         return pieces
