@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Input;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
@@ -55,7 +56,40 @@ public sealed class MainWindowViewModelTests
         e5.ClickCommand.Execute(null);
 
         Assert.Equal("Status: In progress. Side to move: White.", viewModel.GameStatusText);
-        Assert.Equal("Invalid move target: e5.", viewModel.FeedbackText);
+        Assert.Equal("Invalid move target: e5. Legal destinations from e2: e3, e4.", viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public void ClickingEmptySquare_ShowsSelectionGuidance()
+    {
+        var viewModel = CreateViewModel();
+        var e3 = FindSquare(viewModel, 4, 2);
+
+        e3.ClickCommand.Execute(null);
+
+        Assert.Equal("No piece at e3. Select one of your White pieces.", viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public void ClickingOpponentPieceOnWrongTurn_ShowsTurnFeedback()
+    {
+        var viewModel = CreateViewModel();
+        var e7 = FindSquare(viewModel, 4, 6);
+
+        e7.ClickCommand.Execute(null);
+
+        Assert.Equal("Cannot select Black piece at e7. It is White to move.", viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public void ClickingPieceWithNoLegalMoves_ShowsNoLegalMovesFeedback()
+    {
+        var viewModel = CreateViewModel();
+        var e1 = FindSquare(viewModel, 4, 0);
+
+        e1.ClickCommand.Execute(null);
+
+        Assert.Equal("Selected square e1 has no legal moves.", viewModel.FeedbackText);
     }
 
     [Fact]
@@ -110,6 +144,39 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(0, session.GetLegalMovesFromCallCount);
     }
 
+    [Fact]
+    public void HandleKeyboardInput_ArrowAndEnter_AppliesMove()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.Equal("Keyboard focus: e2.", viewModel.FocusedSquareText);
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Up));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Up));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+
+        Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
+        Assert.Equal(string.Empty, viewModel.FeedbackText);
+        Assert.Equal("Last action: White moved Pawn from e2 to e4.", viewModel.LastActionText);
+        Assert.Equal("Keyboard focus: e4.", viewModel.FocusedSquareText);
+    }
+
+    [Fact]
+    public void HandleKeyboardInput_Escape_ClearsSelection()
+    {
+        var viewModel = CreateViewModel();
+        var e3 = FindSquare(viewModel, 4, 2);
+        var e3BeforeSelection = e3.Background;
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+        Assert.NotEqual(e3BeforeSelection, e3.Background);
+        Assert.True(viewModel.HandleKeyboardInput(Key.Escape));
+
+        Assert.Equal(e3BeforeSelection, e3.Background);
+        Assert.Equal("Selection cleared.", viewModel.FeedbackText);
+    }
+
     private static MainWindowViewModel CreateViewModel()
     {
         var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
@@ -126,7 +193,8 @@ public sealed class MainWindowViewModelTests
             HalfmoveClock: 0,
             FullmoveNumber: 1,
             Status: status,
-            MoveHistory: []);
+            MoveHistory: [],
+            PositionHistory: []);
     }
 
     private static BoardSquareViewModel FindSquare(MainWindowViewModel viewModel, int file, int rank)

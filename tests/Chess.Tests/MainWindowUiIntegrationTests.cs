@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Headless.XUnit;
+using Avalonia.Input;
 using Avalonia.VisualTree;
 using Chess.AppCore;
 using Chess.Domain;
@@ -76,7 +77,7 @@ public sealed class MainWindowUiIntegrationTests
             Click(FindSquareButton(window, "e5"));
 
             Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
-            Assert.Equal("Invalid move target: e5.", GetFeedbackText(window));
+            Assert.Equal("Invalid move target: e5. Legal destinations from e2: e3, e4.", GetFeedbackText(window));
             Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
         }
         finally
@@ -93,6 +94,7 @@ public sealed class MainWindowUiIntegrationTests
         try
         {
             window.Show();
+            window.Focus();
 
             var e2 = FindSquareButton(window, "e2");
             var e4 = FindSquareButton(window, "e4");
@@ -105,6 +107,81 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal(string.Empty, GetFeedbackText(window));
             Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
             Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Wasd_UpdatesFocusedSquareThroughWindowKeyDown()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            PressKey(window, Key.W);
+            Assert.Equal("Keyboard focus: e3.", GetFocusedSquareText(window));
+            PressKey(window, Key.D);
+            Assert.Equal("Keyboard focus: f3.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Escape_ClearsSelectionFeedback()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var e3 = FindSquareButton(window, "e3");
+            var e3BeforeSelection = e3.Background;
+            Click(FindSquareButton(window, "e2"));
+
+            Assert.NotEqual(e3BeforeSelection, e3.Background);
+
+            PressKey(window, Key.Escape);
+
+            Assert.Equal("Selection cleared.", GetFeedbackText(window));
+            Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
+            Assert.Equal(e3BeforeSelection, e3.Background);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Enter_OnSelectedFocusedSquare_ClearsSelection()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var e3 = FindSquareButton(window, "e3");
+            var e3BeforeSelection = e3.Background;
+            Click(FindSquareButton(window, "e2"));
+            Assert.NotEqual(e3BeforeSelection, e3.Background);
+
+            PressKey(window, Key.Enter);
+
+            Assert.Equal(e3BeforeSelection, e3.Background);
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
         }
         finally
         {
@@ -186,6 +263,19 @@ public sealed class MainWindowUiIntegrationTests
         button.Command.Execute(button.CommandParameter);
     }
 
+    private static void PressKey(Window window, Key key)
+    {
+        var keyEvent = new KeyEventArgs
+        {
+            RoutedEvent = InputElement.KeyDownEvent,
+            Source = window,
+            Key = key,
+            KeyModifiers = KeyModifiers.None
+        };
+
+        window.RaiseEvent(keyEvent);
+    }
+
     private static string GetGameStatusText(Window window)
     {
         var textBlock = window.FindControl<TextBlock>("GameStatusTextBlock");
@@ -201,6 +291,12 @@ public sealed class MainWindowUiIntegrationTests
     private static string GetLastActionText(Window window)
     {
         var textBlock = window.FindControl<TextBlock>("LastActionTextBlock");
+        return textBlock?.Text ?? string.Empty;
+    }
+
+    private static string GetFocusedSquareText(Window window)
+    {
+        var textBlock = window.FindControl<TextBlock>("FocusedSquareTextBlock");
         return textBlock?.Text ?? string.Empty;
     }
 

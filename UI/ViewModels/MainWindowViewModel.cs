@@ -1,9 +1,11 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Avalonia.Input;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.UI.Commands;
@@ -12,13 +14,17 @@ namespace Chess.UI.ViewModels;
 
 public sealed class MainWindowViewModel : INotifyPropertyChanged
 {
+    private static readonly Square DefaultKeyboardFocusSquare = new(4, 1);
+
     private readonly IGameSessionService _gameSessionService;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
     private readonly HashSet<Square> _legalDestinationSquares = [];
     private Square? _selectedSquare;
+    private Square _focusedSquare = DefaultKeyboardFocusSquare;
     private string _gameStatusText = string.Empty;
     private string _lastActionText = string.Empty;
     private string _feedbackText = string.Empty;
+    private string _focusedSquareText = string.Empty;
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
     {
@@ -83,19 +89,71 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public string FocusedSquareText
+    {
+        get => _focusedSquareText;
+        private set
+        {
+            if (_focusedSquareText == value)
+            {
+                return;
+            }
+
+            _focusedSquareText = value;
+            OnPropertyChanged();
+        }
+    }
+
+    public string KeyboardHintText => "Keyboard: Arrow keys move focus, Enter/Space select or move, Esc clears selection.";
+
     public ICommand NewGameCommand { get; }
 
     public void StartNewGame()
     {
         _gameSessionService.StartNewGame();
         ClearSelection();
+        SetFocusedSquare(DefaultKeyboardFocusSquare);
         FeedbackText = string.Empty;
         LastActionText = "Last action: Started a new game.";
         RefreshBoardFromCurrentState();
     }
 
+    public bool HandleKeyboardInput(Key key)
+    {
+        switch (key)
+        {
+            case Key.Left:
+            case Key.A:
+                MoveFocusedSquare(-1, 0);
+                return true;
+            case Key.Right:
+            case Key.D:
+                MoveFocusedSquare(1, 0);
+                return true;
+            case Key.Up:
+            case Key.W:
+                MoveFocusedSquare(0, 1);
+                return true;
+            case Key.Down:
+            case Key.S:
+                MoveFocusedSquare(0, -1);
+                return true;
+            case Key.Enter:
+            case Key.Space:
+                OnSquareClicked(_focusedSquare);
+                return true;
+            case Key.Escape:
+                ClearSelection();
+                FeedbackText = "Selection cleared.";
+                return true;
+            default:
+                return false;
+        }
+    }
+
     private void OnSquareClicked(Square square)
     {
+        SetFocusedSquare(square);
         var currentState = _gameSessionService.CurrentGameState;
 
         if (currentState.Status != GameStatus.InProgress)
@@ -127,30 +185,28 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         if (TryGetPieceAt(currentState, square, out var pieceAtSquare) && pieceAtSquare!.Color == currentState.SideToMove)
         {
-            SelectSquare(square);
-            FeedbackText = string.Empty;
+            SelectSquareAndSetFeedback(square);
             return;
         }
 
-        FeedbackText = $"Invalid move target: {ToCoordinate(square)}.";
+        FeedbackText = BuildInvalidMoveTargetFeedback(square, selectedSquare);
     }
 
     private void TrySelectSquare(Square square, GameState currentState)
     {
         if (!TryGetPieceAt(currentState, square, out var piece))
         {
-            FeedbackText = $"No piece at {ToCoordinate(square)}.";
+            FeedbackText = $"No piece at {ToCoordinate(square)}. Select one of your {currentState.SideToMove} pieces.";
             return;
         }
 
         if (piece!.Color != currentState.SideToMove)
         {
-            FeedbackText = $"It is {currentState.SideToMove} to move.";
+            FeedbackText = $"Cannot select {piece.Color} piece at {ToCoordinate(square)}. It is {currentState.SideToMove} to move.";
             return;
         }
 
-        SelectSquare(square);
-        FeedbackText = string.Empty;
+        SelectSquareAndSetFeedback(square);
     }
 
     private void ExecuteMove(Square fromSquare, Square toSquare, GameState previousState)
@@ -173,7 +229,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         RefreshBoardFromCurrentState();
     }
 
-    private void SelectSquare(Square square)
+    private bool SelectSquare(Square square)
     {
         _selectedSquare = square;
         _legalDestinationSquares.Clear();
@@ -184,6 +240,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         UpdateSquareHighlights();
+        return _legalDestinationSquares.Count > 0;
     }
 
     private void ClearSelection()
@@ -212,10 +269,52 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         {
             var isSelected = _selectedSquare is not null && squareViewModel.Square == _selectedSquare.Value;
             var isLegalDestination = _legalDestinationSquares.Contains(squareViewModel.Square);
+            var isKeyboardFocused = squareViewModel.Square == _focusedSquare;
 
             squareViewModel.SetSelected(isSelected);
             squareViewModel.SetLegalDestination(isLegalDestination);
+            squareViewModel.SetKeyboardFocused(isKeyboardFocused);
         }
+    }
+
+    private void MoveFocusedSquare(int fileDelta, int rankDelta)
+    {
+        var nextFile = Math.Clamp(_focusedSquare.File + fileDelta, 0, 7);
+        var nextRank = Math.Clamp(_focusedSquare.Rank + rankDelta, 0, 7);
+        SetFocusedSquare(new Square(nextFile, nextRank));
+    }
+
+    private void SetFocusedSquare(Square square)
+    {
+        var nextFocusedSquareText = $"Keyboard focus: {ToCoordinate(square)}.";
+
+        if (_focusedSquare == square && FocusedSquareText == nextFocusedSquareText)
+        {
+            return;
+        }
+
+        _focusedSquare = square;
+        FocusedSquareText = nextFocusedSquareText;
+        UpdateSquareHighlights();
+    }
+
+    private void SelectSquareAndSetFeedback(Square square)
+    {
+        var hasLegalMoves = SelectSquare(square);
+        FeedbackText = hasLegalMoves
+            ? string.Empty
+            : $"Selected square {ToCoordinate(square)} has no legal moves.";
+    }
+
+    private string BuildInvalidMoveTargetFeedback(Square targetSquare, Square selectedSquare)
+    {
+        var legalDestinationsText = _legalDestinationSquares.Count == 0
+            ? "none"
+            : string.Join(", ", _legalDestinationSquares
+                .Select(ToCoordinate)
+                .OrderBy(coordinate => coordinate));
+
+        return $"Invalid move target: {ToCoordinate(targetSquare)}. Legal destinations from {ToCoordinate(selectedSquare)}: {legalDestinationsText}.";
     }
 
     private static bool TryGetPieceAt(GameState gameState, Square square, out Piece? piece)

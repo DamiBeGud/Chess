@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
+using Avalonia;
 using Avalonia.Media;
 using Chess.Domain;
 
@@ -8,14 +9,21 @@ namespace Chess.UI.ViewModels;
 
 public sealed class BoardSquareViewModel : INotifyPropertyChanged
 {
-    private static readonly IBrush LightSquareBrush = new SolidColorBrush(Color.Parse("#F0D9B5"));
-    private static readonly IBrush DarkSquareBrush = new SolidColorBrush(Color.Parse("#B58863"));
-    private static readonly IBrush SelectedSquareBrush = new SolidColorBrush(Color.Parse("#F4E36B"));
-    private static readonly IBrush LegalDestinationBrush = new SolidColorBrush(Color.Parse("#A9CF54"));
+    private static readonly IBrush LightSquareBrush = Brush.Parse("#F2E4CB");
+    private static readonly IBrush DarkSquareBrush = Brush.Parse("#9E6B43");
+    private static readonly IBrush SelectedSquareBrush = Brush.Parse("#F6D76A");
+    private static readonly IBrush LegalDestinationBrush = Brush.Parse("#88C34A");
+    private static readonly IBrush DefaultBorderBrush = Brush.Parse("#4A3322");
+    private static readonly IBrush FocusedBorderBrush = Brush.Parse("#1E4ED8");
+    private static readonly IBrush LightCoordinateBrush = Brush.Parse("#4A3322");
+    private static readonly IBrush DarkCoordinateBrush = Brush.Parse("#F6ECDD");
+    private static readonly Thickness DefaultBorderThickness = new(1);
+    private static readonly Thickness FocusedBorderThickness = new(3);
 
     private Piece? _piece;
     private bool _isSelected;
     private bool _isLegalDestination;
+    private bool _isKeyboardFocused;
 
     public BoardSquareViewModel(Square square, ICommand clickCommand)
     {
@@ -47,6 +55,16 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
                     ? LightSquareBrush
                     : DarkSquareBrush;
 
+    public IBrush BorderBrush => _isKeyboardFocused ? FocusedBorderBrush : DefaultBorderBrush;
+
+    public Thickness BorderThickness => _isKeyboardFocused ? FocusedBorderThickness : DefaultBorderThickness;
+
+    public IBrush CoordinateForeground => IsLightSquare ? LightCoordinateBrush : DarkCoordinateBrush;
+
+    public string SquareDescription => _piece is null
+        ? $"{CoordinateLabel}: empty square"
+        : $"{CoordinateLabel}: {_piece.Color} {_piece.Type}";
+
     public void SetPiece(Piece? piece)
     {
         if (_piece == piece)
@@ -56,6 +74,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
 
         _piece = piece;
         OnPropertyChanged(nameof(PieceGlyph));
+        OnPropertyChanged(nameof(SquareDescription));
     }
 
     public void SetSelected(bool isSelected)
@@ -78,6 +97,18 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
 
         _isLegalDestination = isLegalDestination;
         OnPropertyChanged(nameof(Background));
+    }
+
+    public void SetKeyboardFocused(bool isKeyboardFocused)
+    {
+        if (_isKeyboardFocused == isKeyboardFocused)
+        {
+            return;
+        }
+
+        _isKeyboardFocused = isKeyboardFocused;
+        OnPropertyChanged(nameof(BorderBrush));
+        OnPropertyChanged(nameof(BorderThickness));
     }
 
     private static string GetPieceGlyph(Piece piece)
