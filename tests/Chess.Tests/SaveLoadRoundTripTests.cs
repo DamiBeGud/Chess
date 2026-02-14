@@ -60,6 +60,7 @@ public sealed class SaveLoadRoundTripTests
             Assert.Equal(expected.FullmoveNumber, loaded.FullmoveNumber);
             Assert.Equal(expected.Status, loaded.Status);
             Assert.Equal(expected.MoveHistory.Count, loaded.MoveHistory.Count);
+            Assert.Equal(expected.PositionHistory ?? [], loaded.PositionHistory ?? []);
             Assert.Equal(NormalizeMoves(expected.MoveHistory), NormalizeMoves(loaded.MoveHistory));
 
             Assert.Equal(NormalizePieces(expected.Pieces), NormalizePieces(loaded.Pieces));
@@ -96,6 +97,29 @@ public sealed class SaveLoadRoundTripTests
         {
             await File.WriteAllTextAsync(filePath, JsonSerializer.Serialize(unsupported));
             await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(filePath));
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Load_WithLegacySchemaVersion_ThrowsInvalidDataException()
+    {
+        var engine = new ChessGameEngine();
+        var store = new JsonGameStateStore();
+        var legacy = engine.CreateInitialGameState() with { SchemaVersion = 1 };
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(filePath, JsonSerializer.Serialize(legacy));
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(filePath));
+            Assert.Contains("Legacy saves must be re-created", exception.Message);
         }
         finally
         {
@@ -150,6 +174,7 @@ public sealed class SaveLoadRoundTripTests
             Assert.Equal(expected.FullmoveNumber, loaded.FullmoveNumber);
             Assert.Equal(expected.Status, loaded.Status);
             Assert.Equal(expected.SchemaVersion, loaded.SchemaVersion);
+            Assert.Equal(expected.PositionHistory ?? [], loaded.PositionHistory ?? []);
             Assert.Equal(NormalizePieces(expected.Pieces), NormalizePieces(loaded.Pieces));
             Assert.Equal(NormalizeMoves(expected.MoveHistory), NormalizeMoves(loaded.MoveHistory));
 
@@ -160,6 +185,58 @@ public sealed class SaveLoadRoundTripTests
                 .OrderBy(move => move)
                 .ToArray();
             Assert.Equal(expectedLegalMoves, loadedLegalMoves);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SaveAndLoad_PreservesThreefoldRepetitionContinuation()
+    {
+        var engine = new ChessGameEngine();
+        var store = new JsonGameStateStore();
+
+        var state = new GameState(
+            Pieces:
+            [
+                new PiecePlacement(new Square(0, 0), new Piece(PieceType.King, PieceColor.White)),
+                new PiecePlacement(new Square(1, 0), new Piece(PieceType.Knight, PieceColor.White)),
+                new PiecePlacement(new Square(0, 1), new Piece(PieceType.Pawn, PieceColor.White)),
+                new PiecePlacement(new Square(7, 7), new Piece(PieceType.King, PieceColor.Black))
+            ],
+            SideToMove: PieceColor.White,
+            CastlingRights: CastlingRights.None,
+            EnPassantTarget: null,
+            HalfmoveClock: 0,
+            FullmoveNumber: 1,
+            Status: GameStatus.InProgress,
+            MoveHistory: [],
+            PositionHistory: []);
+
+        Assert.True(engine.TryApplyMove(state, new Square(1, 0), new Square(2, 2), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(7, 7), new Square(6, 7), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(2, 2), new Square(1, 0), out state));
+        Assert.True(engine.TryApplyMove(state, new Square(6, 7), new Square(7, 7), out var beforeSave));
+        Assert.Equal(GameStatus.InProgress, beforeSave.Status);
+
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            await store.SaveAsync(filePath, beforeSave);
+            var loaded = await store.LoadAsync(filePath);
+
+            Assert.True(engine.TryApplyMove(loaded, new Square(1, 0), new Square(2, 2), out loaded));
+            Assert.True(engine.TryApplyMove(loaded, new Square(7, 7), new Square(6, 7), out loaded));
+            Assert.True(engine.TryApplyMove(loaded, new Square(2, 2), new Square(1, 0), out loaded));
+            Assert.True(engine.TryApplyMove(loaded, new Square(6, 7), new Square(7, 7), out loaded));
+
+            Assert.Equal(GameStatus.Draw, loaded.Status);
         }
         finally
         {

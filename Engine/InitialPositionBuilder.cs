@@ -18,7 +18,8 @@ internal static class InitialPositionBuilder
             HalfmoveClock: 0,
             FullmoveNumber: 1,
             Status: GameStatus.InProgress,
-            MoveHistory: []);
+            MoveHistory: [],
+            PositionHistory: []);
     }
 
     private static IReadOnlyList<PiecePlacement> CreateStandardPiecePlacement()

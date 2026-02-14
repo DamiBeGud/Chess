@@ -8,7 +8,7 @@ namespace Chess.Persistence;
 
 public sealed class JsonGameStateStore : IGameStateStore
 {
-    private const int SupportedSchemaVersion = 1;
+    private const int SupportedSchemaVersion = 2;
 
     private static readonly JsonSerializerOptions SerializerOptions = new()
     {
@@ -24,8 +24,7 @@ public sealed class JsonGameStateStore : IGameStateStore
 
         if (gameState.SchemaVersion != SupportedSchemaVersion)
         {
-            throw new InvalidDataException(
-                $"Unsupported save schema version '{gameState.SchemaVersion}'. Expected '{SupportedSchemaVersion}'.");
+            throw CreateUnsupportedSchemaException(gameState.SchemaVersion);
         }
 
         var directory = Path.GetDirectoryName(filePath);
@@ -55,10 +54,18 @@ public sealed class JsonGameStateStore : IGameStateStore
 
         if (gameState.SchemaVersion != SupportedSchemaVersion)
         {
-            throw new InvalidDataException(
-                $"Unsupported save schema version '{gameState.SchemaVersion}'. Expected '{SupportedSchemaVersion}'.");
+            throw CreateUnsupportedSchemaException(gameState.SchemaVersion);
         }
 
         return gameState;
+    }
+
+    private static InvalidDataException CreateUnsupportedSchemaException(int schemaVersion)
+    {
+        var message = schemaVersion < SupportedSchemaVersion
+            ? $"Unsupported save schema version '{schemaVersion}'. Expected '{SupportedSchemaVersion}'. Legacy saves must be re-created with the current app version."
+            : $"Unsupported save schema version '{schemaVersion}'. Expected '{SupportedSchemaVersion}'.";
+
+        return new InvalidDataException(message);
     }
 }

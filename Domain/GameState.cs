@@ -11,4 +11,5 @@ public sealed record GameState(
     int FullmoveNumber,
     GameStatus Status,
     IReadOnlyList<Move> MoveHistory,
-    int SchemaVersion = 1);
+    IReadOnlyList<string>? PositionHistory = null,
+    int SchemaVersion = 2);

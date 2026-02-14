@@ -669,7 +669,7 @@ public sealed class ChessGameEngine : IGameEngine
         return board;
     }
 
-    private static GameState BuildNextGameState(GameState currentState, Move legalMove)
+    private GameState BuildNextGameState(GameState currentState, Move legalMove)
     {
         var board = BuildBoard(currentState);
         var boardAfterMove = ApplyMoveOnBoard(board, legalMove);
@@ -688,17 +688,69 @@ public sealed class ChessGameEngine : IGameEngine
 
         var updatedCastlingRights = UpdateCastlingRights(currentState.CastlingRights, legalMove);
         var enPassantTarget = DetermineEnPassantTarget(legalMove);
+        var nextSideToMove = GetOpponentColor(currentState.SideToMove);
 
-        return currentState with
+        var nextState = currentState with
         {
             Pieces = ToPlacements(boardAfterMove),
-            SideToMove = GetOpponentColor(currentState.SideToMove),
+            SideToMove = nextSideToMove,
             HalfmoveClock = halfmoveClock,
             FullmoveNumber = fullmoveNumber,
             CastlingRights = updatedCastlingRights,
             EnPassantTarget = enPassantTarget,
-            MoveHistory = moveHistory
+            MoveHistory = moveHistory,
+            Status = GameStatus.InProgress
         };
+
+        var positionHistory = currentState.PositionHistory?.ToList() ?? [];
+        if (positionHistory.Count == 0)
+        {
+            positionHistory.Add(BuildPositionSignature(currentState));
+        }
+
+        var nextPositionSignature = BuildPositionSignature(nextState);
+        positionHistory.Add(nextPositionSignature);
+        var nextStatus = DetermineGameStatus(nextState, nextPositionSignature, positionHistory);
+
+        return nextState with
+        {
+            Status = nextStatus,
+            PositionHistory = positionHistory
+        };
+    }
+
+    private GameStatus DetermineGameStatus(
+        GameState state,
+        string currentPositionSignature,
+        IReadOnlyList<string> positionHistory)
+    {
+        var legalMoves = GenerateLegalMoves(state);
+        if (legalMoves.Count == 0)
+        {
+            if (IsKingInCheck(state, state.SideToMove))
+            {
+                return state.SideToMove == PieceColor.White ? GameStatus.BlackWin : GameStatus.WhiteWin;
+            }
+
+            return GameStatus.Draw;
+        }
+
+        if (state.HalfmoveClock >= 100)
+        {
+            return GameStatus.Draw;
+        }
+
+        if (IsThreefoldRepetition(currentPositionSignature, positionHistory))
+        {
+            return GameStatus.Draw;
+        }
+
+        if (IsInsufficientMaterial(state))
+        {
+            return GameStatus.Draw;
+        }
+
+        return GameStatus.InProgress;
     }
 
     private static Piece BuildMovedPieceAfterMove(Move move)
@@ -802,6 +854,118 @@ public sealed class ChessGameEngine : IGameEngine
     private static bool IsPromotionRank(PieceColor color, int rank)
     {
         return (color == PieceColor.White && rank == 7) || (color == PieceColor.Black && rank == 0);
+    }
+
+    private static bool IsThreefoldRepetition(string currentPositionSignature, IReadOnlyList<string> positionHistory)
+    {
+        var occurrences = 0;
+
+        foreach (var positionSignature in positionHistory)
+        {
+            if (positionSignature != currentPositionSignature)
+            {
+                continue;
+            }
+
+            occurrences++;
+            if (occurrences >= 3)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsInsufficientMaterial(GameState gameState)
+    {
+        var nonKingPlacements = gameState.Pieces
+            .Where(placement => placement.Piece.Type != PieceType.King)
+            .ToArray();
+
+        if (nonKingPlacements.Length == 0)
+        {
+            return true;
+        }
+
+        if (nonKingPlacements.Any(placement =>
+                placement.Piece.Type is PieceType.Pawn or PieceType.Rook or PieceType.Queen))
+        {
+            return false;
+        }
+
+        if (nonKingPlacements.Length == 1)
+        {
+            return true;
+        }
+
+        var whiteMinorPlacements = nonKingPlacements
+            .Where(placement => placement.Piece.Color == PieceColor.White)
+            .ToArray();
+        var blackMinorPlacements = nonKingPlacements
+            .Where(placement => placement.Piece.Color == PieceColor.Black)
+            .ToArray();
+
+        if (whiteMinorPlacements.Length == 2
+            && blackMinorPlacements.Length == 0
+            && whiteMinorPlacements.All(placement => placement.Piece.Type == PieceType.Knight))
+        {
+            return true;
+        }
+
+        if (blackMinorPlacements.Length == 2
+            && whiteMinorPlacements.Length == 0
+            && blackMinorPlacements.All(placement => placement.Piece.Type == PieceType.Knight))
+        {
+            return true;
+        }
+
+        if (!nonKingPlacements.All(placement => placement.Piece.Type == PieceType.Bishop))
+        {
+            return false;
+        }
+
+        var hasLightSquareBishop = nonKingPlacements.Any(placement => IsLightSquare(placement.Square));
+        var hasDarkSquareBishop = nonKingPlacements.Any(placement => !IsLightSquare(placement.Square));
+        return !(hasLightSquareBishop && hasDarkSquareBishop);
+    }
+
+    private static string BuildPositionSignature(GameState gameState)
+    {
+        var pieceLayout = string.Join(
+            ",",
+            gameState.Pieces
+                .OrderBy(placement => placement.Square.Rank)
+                .ThenBy(placement => placement.Square.File)
+                .Select(placement =>
+                    $"{ToPieceSymbol(placement.Piece)}{placement.Square.File}{placement.Square.Rank}"));
+
+        var enPassant = gameState.EnPassantTarget is null
+            ? "-"
+            : $"{gameState.EnPassantTarget.Value.File}{gameState.EnPassantTarget.Value.Rank}";
+
+        return $"{gameState.SideToMove}|{(int)gameState.CastlingRights}|{enPassant}|{pieceLayout}";
+    }
+
+    private static char ToPieceSymbol(Piece piece)
+    {
+        var symbol = piece.Type switch
+        {
+            PieceType.Pawn => 'p',
+            PieceType.Knight => 'n',
+            PieceType.Bishop => 'b',
+            PieceType.Rook => 'r',
+            PieceType.Queen => 'q',
+            PieceType.King => 'k',
+            _ => throw new ArgumentOutOfRangeException(nameof(piece))
+        };
+
+        return piece.Color == PieceColor.White ? char.ToUpperInvariant(symbol) : symbol;
+    }
+
+    private static bool IsLightSquare(Square square)
+    {
+        return (square.File + square.Rank) % 2 != 0;
     }
 
     private static IReadOnlyList<PiecePlacement> ToPlacements(IReadOnlyDictionary<Square, Piece> board)
