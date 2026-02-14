@@ -28,6 +28,17 @@ public sealed class GameSessionService : IGameSessionService
         return _currentGameState;
     }
 
+    public bool TryMakeMove(Square fromSquare, Square toSquare, PieceType? promotionPieceType = null)
+    {
+        if (!_gameEngine.TryApplyMove(_currentGameState, fromSquare, toSquare, out var updatedGameState, promotionPieceType))
+        {
+            return false;
+        }
+
+        _currentGameState = updatedGameState;
+        return true;
+    }
+
     public async Task SaveAsync(string filePath, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(filePath))

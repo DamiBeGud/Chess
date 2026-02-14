@@ -92,6 +92,34 @@ public sealed class ChessGameEngine : IGameEngine
             .Any(move => move.To == toSquare && move.PromotionPieceType == promotionPieceType);
     }
 
+    public bool TryApplyMove(
+        GameState gameState,
+        Square fromSquare,
+        Square toSquare,
+        out GameState updatedGameState,
+        PieceType? promotionPieceType = null)
+    {
+        ArgumentNullException.ThrowIfNull(gameState);
+
+        if (gameState.Status != GameStatus.InProgress)
+        {
+            updatedGameState = gameState;
+            return false;
+        }
+
+        Move? legalMove = GenerateLegalMoves(gameState, fromSquare)
+            .FirstOrDefault(move => move.To == toSquare && move.PromotionPieceType == promotionPieceType);
+
+        if (legalMove is null)
+        {
+            updatedGameState = gameState;
+            return false;
+        }
+
+        updatedGameState = BuildNextGameState(gameState, legalMove);
+        return true;
+    }
+
     public bool IsKingInCheck(GameState gameState, PieceColor color)
     {
         ArgumentNullException.ThrowIfNull(gameState);
@@ -285,7 +313,7 @@ public sealed class ChessGameEngine : IGameEngine
         Move move,
         PieceColor movingColor)
     {
-        var boardAfterMove = ApplyMove(board, move);
+        var boardAfterMove = ApplyMoveOnBoard(board, move);
         var kingSquare = move.MovedPiece.Type == PieceType.King
             ? move.To
             : FindKingSquare(boardAfterMove, movingColor);
@@ -293,7 +321,7 @@ public sealed class ChessGameEngine : IGameEngine
         return IsSquareAttacked(boardAfterMove, kingSquare, GetOpponentColor(movingColor));
     }
 
-    private static Dictionary<Square, Piece> ApplyMove(IReadOnlyDictionary<Square, Piece> board, Move move)
+    private static Dictionary<Square, Piece> ApplyMoveOnBoard(IReadOnlyDictionary<Square, Piece> board, Move move)
     {
         var updatedBoard = new Dictionary<Square, Piece>(board);
         updatedBoard.Remove(move.From);
@@ -422,6 +450,46 @@ public sealed class ChessGameEngine : IGameEngine
         }
 
         return board;
+    }
+
+    private static GameState BuildNextGameState(GameState currentState, Move legalMove)
+    {
+        var board = BuildBoard(currentState);
+        board.Remove(legalMove.From);
+        board.Remove(legalMove.To);
+
+        var movedPieceAfterMove = legalMove.MovedPiece with { HasMoved = true };
+        board[legalMove.To] = movedPieceAfterMove;
+
+        var moveHistory = currentState.MoveHistory.ToList();
+        moveHistory.Add(legalMove with { MovedPiece = movedPieceAfterMove });
+
+        var halfmoveClock = legalMove.CapturedPiece is not null || legalMove.MovedPiece.Type == PieceType.Pawn
+            ? 0
+            : currentState.HalfmoveClock + 1;
+
+        var fullmoveNumber = currentState.SideToMove == PieceColor.Black
+            ? currentState.FullmoveNumber + 1
+            : currentState.FullmoveNumber;
+
+        return currentState with
+        {
+            Pieces = ToPlacements(board),
+            SideToMove = GetOpponentColor(currentState.SideToMove),
+            HalfmoveClock = halfmoveClock,
+            FullmoveNumber = fullmoveNumber,
+            EnPassantTarget = null,
+            MoveHistory = moveHistory
+        };
+    }
+
+    private static IReadOnlyList<PiecePlacement> ToPlacements(IReadOnlyDictionary<Square, Piece> board)
+    {
+        return board
+            .Select(entry => new PiecePlacement(entry.Key, entry.Value))
+            .OrderBy(placement => placement.Square.Rank)
+            .ThenBy(placement => placement.Square.File)
+            .ToArray();
     }
 
     private static PieceColor GetOpponentColor(PieceColor color)

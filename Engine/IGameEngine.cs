@@ -10,5 +10,11 @@ public interface IGameEngine
     IReadOnlyList<Move> GenerateLegalMoves(GameState gameState, Square fromSquare);
     IReadOnlyList<Move> GenerateLegalMoves(GameState gameState);
     bool IsMoveLegal(GameState gameState, Square fromSquare, Square toSquare, PieceType? promotionPieceType = null);
+    bool TryApplyMove(
+        GameState gameState,
+        Square fromSquare,
+        Square toSquare,
+        out GameState updatedGameState,
+        PieceType? promotionPieceType = null);
     bool IsKingInCheck(GameState gameState, PieceColor color);
 }
