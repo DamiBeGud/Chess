@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Controls;
+using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
 using Avalonia.VisualTree;
@@ -135,6 +136,207 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public void KeyboardInput_Arrows_UpdatesFocusedSquareThroughWindowKeyDown()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            PressKey(window, Key.Up);
+            Assert.Equal("Keyboard focus: e3.", GetFocusedSquareText(window));
+            PressKey(window, Key.Left);
+            Assert.Equal("Keyboard focus: d3.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_ArrowsFromSameBoardSource_MoveFocusCumulatively()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            var sourceButton = FindSquareButton(window, "e2");
+
+            PressKey(window, Key.Up, sourceButton);
+            Assert.Equal("Keyboard focus: e3.", GetFocusedSquareText(window));
+            PressKey(window, Key.Up, sourceButton);
+            Assert.Equal("Keyboard focus: e4.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_WasdFromSameBoardSource_MoveFocusCumulatively()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+            var sourceButton = FindSquareButton(window, "e2");
+
+            PressKey(window, Key.D, sourceButton);
+            Assert.Equal("Keyboard focus: f2.", GetFocusedSquareText(window));
+            PressKey(window, Key.D, sourceButton);
+            Assert.Equal("Keyboard focus: g2.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Enter_FromStaleBoardSource_CommitsMoveFromFocusedSquare()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var sourceButton = FindSquareButton(window, "e2");
+            var e4 = FindSquareButton(window, "e4");
+
+            PressKey(window, Key.Enter, sourceButton);
+            PressKey(window, Key.Up, sourceButton);
+            PressKey(window, Key.Up, sourceButton);
+            Assert.Equal("Keyboard focus: e4.", GetFocusedSquareText(window));
+            PressKey(window, Key.Enter, sourceButton);
+
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+            Assert.Equal("Last action: White moved Pawn from e2 to e4.", GetLastActionText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal(string.Empty, GetSquareViewModel(sourceButton).PieceGlyph);
+            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Space_FromStaleBoardSource_CommitsMoveFromFocusedSquare()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var sourceButton = FindSquareButton(window, "f2");
+            var f3 = FindSquareButton(window, "f3");
+
+            PressKey(window, Key.Right);
+            Assert.Equal("Keyboard focus: f2.", GetFocusedSquareText(window));
+            PressKey(window, Key.Space, sourceButton);
+            PressKey(window, Key.Up, sourceButton);
+            Assert.Equal("Keyboard focus: f3.", GetFocusedSquareText(window));
+            PressKey(window, Key.Space, sourceButton);
+
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+            Assert.Equal("Last action: White moved Pawn from f2 to f3.", GetLastActionText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal(string.Empty, GetSquareViewModel(sourceButton).PieceGlyph);
+            Assert.Equal("\u2659", GetSquareViewModel(f3).PieceGlyph);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Enter_OnStartNewGameButton_ResetsGameWithoutApplyingFocusedSquareAction()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var startNewGameButton = FindStartNewGameButton(window);
+            var e2 = FindSquareButton(window, "e2");
+            var e4 = FindSquareButton(window, "e4");
+
+            Click(e2);
+            Click(e4);
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+            Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
+            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+
+            startNewGameButton.Focus();
+            PressKeyOnHeadlessWindow(window, Key.Enter, PhysicalKey.Enter);
+            ReleaseKeyOnHeadlessWindow(window, Key.Enter, PhysicalKey.Enter);
+
+            Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
+            Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal("\u2659", GetSquareViewModel(e2).PieceGlyph);
+            Assert.Equal(string.Empty, GetSquareViewModel(e4).PieceGlyph);
+            Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void KeyboardInput_Space_OnStartNewGameButton_ResetsGameWithoutApplyingFocusedSquareAction()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var startNewGameButton = FindStartNewGameButton(window);
+            var e2 = FindSquareButton(window, "e2");
+            var e4 = FindSquareButton(window, "e4");
+
+            Click(e2);
+            Click(e4);
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+            Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
+            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+
+            startNewGameButton.Focus();
+            PressKeyOnHeadlessWindow(window, Key.Space, PhysicalKey.Space);
+            ReleaseKeyOnHeadlessWindow(window, Key.Space, PhysicalKey.Space);
+
+            Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
+            Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal("\u2659", GetSquareViewModel(e2).PieceGlyph);
+            Assert.Equal(string.Empty, GetSquareViewModel(e4).PieceGlyph);
+            Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void KeyboardInput_Escape_ClearsSelectionFeedback()
     {
         var window = CreateWindow(CreateSessionService());
@@ -251,6 +453,13 @@ public sealed class MainWindowUiIntegrationTests
             .Single(button => string.Equals(button.Tag?.ToString(), coordinate, StringComparison.OrdinalIgnoreCase));
     }
 
+    private static Button FindStartNewGameButton(Window window)
+    {
+        return window.GetVisualDescendants()
+            .OfType<Button>()
+            .Single(button => string.Equals(button.Content?.ToString(), "Start New Game", StringComparison.Ordinal));
+    }
+
     private static BoardSquareViewModel GetSquareViewModel(Button squareButton)
     {
         return Assert.IsType<BoardSquareViewModel>(squareButton.DataContext);
@@ -263,17 +472,42 @@ public sealed class MainWindowUiIntegrationTests
         button.Command.Execute(button.CommandParameter);
     }
 
-    private static void PressKey(Window window, Key key)
+    private static void PressKey(Window window, Key key, object? source = null)
     {
         var keyEvent = new KeyEventArgs
         {
             RoutedEvent = InputElement.KeyDownEvent,
-            Source = window,
             Key = key,
             KeyModifiers = KeyModifiers.None
         };
 
+        if (source is not null)
+        {
+            keyEvent.Source = source;
+        }
+
+        if (source is InputElement inputElement)
+        {
+            inputElement.RaiseEvent(keyEvent);
+            return;
+        }
+
         window.RaiseEvent(keyEvent);
+    }
+
+    private static void PressKeyOnHeadlessWindow(Window window, Key key, PhysicalKey physicalKey)
+    {
+        window.KeyPress(key, RawInputModifiers.None, physicalKey, GetKeySymbol(key));
+    }
+
+    private static void ReleaseKeyOnHeadlessWindow(Window window, Key key, PhysicalKey physicalKey)
+    {
+        window.KeyRelease(key, RawInputModifiers.None, physicalKey, GetKeySymbol(key));
+    }
+
+    private static string GetKeySymbol(Key key)
+    {
+        return key == Key.Space ? " " : string.Empty;
     }
 
     private static string GetGameStatusText(Window window)

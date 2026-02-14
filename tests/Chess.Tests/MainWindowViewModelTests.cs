@@ -163,6 +163,58 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void HandleKeyboardInput_WasdAndSpace_AppliesMoveFromFocusedSquare()
+    {
+        var viewModel = CreateViewModel();
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.D));
+        Assert.Equal("Keyboard focus: f2.", viewModel.FocusedSquareText);
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Space));
+        Assert.True(viewModel.HandleKeyboardInput(Key.W));
+        Assert.Equal("Keyboard focus: f3.", viewModel.FocusedSquareText);
+        Assert.True(viewModel.HandleKeyboardInput(Key.Space));
+
+        Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
+        Assert.Equal(string.Empty, viewModel.FeedbackText);
+        Assert.Equal("Last action: White moved Pawn from f2 to f3.", viewModel.LastActionText);
+        Assert.Equal(string.Empty, FindSquare(viewModel, 5, 1).PieceGlyph);
+        Assert.Equal("\u2659", FindSquare(viewModel, 5, 2).PieceGlyph);
+    }
+
+    [Fact]
+    public void HandleKeyboardInput_SelectionAndFocusStaySynchronized_AcrossReselectInvalidAndEscape()
+    {
+        var viewModel = CreateViewModel();
+        var g3 = FindSquare(viewModel, 6, 2);
+        var h3 = FindSquare(viewModel, 7, 2);
+        var g3BeforeSelection = g3.Background;
+        var h3BeforeSelection = h3.Background;
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Right));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Right));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Right));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Left));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Up));
+        Assert.Equal("Keyboard focus: g3.", viewModel.FocusedSquareText);
+        Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
+
+        Assert.Equal("Invalid move target: g3. Legal destinations from h2: h3, h4.", viewModel.FeedbackText);
+        Assert.Equal(g3BeforeSelection, g3.Background);
+        Assert.NotEqual(h3BeforeSelection, h3.Background);
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Escape));
+        Assert.Equal("Selection cleared.", viewModel.FeedbackText);
+        Assert.Equal("Keyboard focus: g3.", viewModel.FocusedSquareText);
+        Assert.Equal(h3BeforeSelection, h3.Background);
+    }
+
+    [Fact]
     public void HandleKeyboardInput_Escape_ClearsSelection()
     {
         var viewModel = CreateViewModel();
