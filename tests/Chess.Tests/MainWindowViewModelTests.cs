@@ -106,6 +106,23 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void HandleKeyboardInput_AfterInvalidMouseTarget_StartsArrowMovementFromSelectedPiece()
+    {
+        var viewModel = CreateViewModel();
+        var e2 = FindSquare(viewModel, 4, 1);
+        var e5 = FindSquare(viewModel, 4, 4);
+
+        e2.ClickCommand.Execute(null);
+        e5.ClickCommand.Execute(null);
+        Assert.Equal("Invalid move target: e5. Legal destinations from e2: e3, e4.", viewModel.FeedbackText);
+
+        Assert.True(viewModel.HandleKeyboardInput(Key.Up));
+        Assert.Equal("Keyboard focus: e3.", viewModel.FocusedSquareText);
+        Assert.True(viewModel.HandleKeyboardInput(Key.Up));
+        Assert.Equal("Keyboard focus: e4.", viewModel.FocusedSquareText);
+    }
+
+    [Fact]
     public void ClickingEmptySquare_ShowsSelectionGuidance()
     {
         var viewModel = CreateViewModel();

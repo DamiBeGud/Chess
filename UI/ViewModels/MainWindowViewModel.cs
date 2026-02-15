@@ -34,6 +34,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
     private readonly HashSet<Square> _legalDestinationSquares = [];
     private Square? _selectedSquare;
+    private bool _hasMovedFocusSinceSelection;
     private Square _focusedSquare = DefaultKeyboardFocusSquare;
     private string _gameStatusText = string.Empty;
     private string _lastActionText = string.Empty;
@@ -484,6 +485,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool SelectSquare(Square square)
     {
         _selectedSquare = square;
+        _hasMovedFocusSinceSelection = false;
         _legalDestinationSquares.Clear();
 
         foreach (var move in _gameSessionService.GetLegalMovesFrom(square))
@@ -498,6 +500,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void ClearSelection()
     {
         _selectedSquare = null;
+        _hasMovedFocusSinceSelection = false;
         _legalDestinationSquares.Clear();
         UpdateSquareHighlights();
     }
@@ -693,9 +696,17 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private void MoveFocusedSquare(int fileDelta, int rankDelta)
     {
-        var nextFile = Math.Clamp(_focusedSquare.File + fileDelta, 0, 7);
-        var nextRank = Math.Clamp(_focusedSquare.Rank + rankDelta, 0, 7);
+        var movementOrigin = _selectedSquare is not null && !_hasMovedFocusSinceSelection
+            ? _selectedSquare.Value
+            : _focusedSquare;
+        var nextFile = Math.Clamp(movementOrigin.File + fileDelta, 0, 7);
+        var nextRank = Math.Clamp(movementOrigin.Rank + rankDelta, 0, 7);
         SetFocusedSquare(new Square(nextFile, nextRank));
+
+        if (_selectedSquare is not null)
+        {
+            _hasMovedFocusSinceSelection = true;
+        }
     }
 
     private void SetFocusedSquare(Square square)
