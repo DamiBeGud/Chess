@@ -14,7 +14,9 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     private static readonly IBrush LightSquareBrush = Brush.Parse("#F2E4CB");
     private static readonly IBrush DarkSquareBrush = Brush.Parse("#9E6B43");
     private static readonly IBrush SelectedSquareBrush = Brush.Parse("#F6D76A");
-    private static readonly IBrush LegalDestinationBrush = Brush.Parse("#88C34A");
+    private static readonly IBrush LegalMoveIndicatorBrush = Brush.Parse("#3e863e");
+    private const double LegalMoveIndicatorOpacityValue = 0.6d;
+    private const double LegalMoveIndicatorDiameterValue = 40d;
     private static readonly IBrush DefaultBorderBrush = Brush.Parse("#4A3322");
     private static readonly IBrush FocusedBorderBrush = Brush.Parse("#1E4ED8");
     private static readonly Thickness DefaultBorderThickness = new(0);
@@ -59,11 +61,17 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     public IBrush Background =>
         _isSelected
             ? SelectedSquareBrush
-            : _isLegalDestination
-                ? LegalDestinationBrush
-                : IsLightSquare
-                    ? LightSquareBrush
-                    : DarkSquareBrush;
+            : IsLightSquare
+                ? LightSquareBrush
+                : DarkSquareBrush;
+
+    public bool IsLegalDestinationIndicatorVisible => _isLegalDestination && !_isSelected;
+
+    public IBrush LegalDestinationIndicatorBrush => LegalMoveIndicatorBrush;
+
+    public double LegalDestinationIndicatorOpacity => LegalMoveIndicatorOpacityValue;
+
+    public double LegalDestinationIndicatorDiameter => LegalMoveIndicatorDiameterValue;
 
     public IBrush BorderBrush => _isKeyboardFocused ? FocusedBorderBrush : DefaultBorderBrush;
 
@@ -97,6 +105,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
 
         _isSelected = isSelected;
         OnPropertyChanged(nameof(Background));
+        OnPropertyChanged(nameof(IsLegalDestinationIndicatorVisible));
     }
 
     public void SetLegalDestination(bool isLegalDestination)
@@ -107,7 +116,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
         }
 
         _isLegalDestination = isLegalDestination;
-        OnPropertyChanged(nameof(Background));
+        OnPropertyChanged(nameof(IsLegalDestinationIndicatorVisible));
     }
 
     public void SetKeyboardFocused(bool isKeyboardFocused)

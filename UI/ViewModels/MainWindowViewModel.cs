@@ -41,6 +41,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _focusedSquareText = string.Empty;
     private IReadOnlyList<string> _moveHistoryEntries = Array.Empty<string>();
     private string _persistenceFilePath = BuildDefaultPersistenceFilePath();
+    private bool _showLegalMoveSuggestions = true;
     private bool _isPlayVsAiEnabled;
     private PieceColor _aiControlledColor = PieceColor.Black;
     private int _aiSearchDepth = 2;
@@ -155,6 +156,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public string KeyboardHintText => "Keyboard: Arrow keys move focus, Enter/Space select or move, Esc clears selection.";
+
+    public bool ShowLegalMoveSuggestions
+    {
+        get => _showLegalMoveSuggestions;
+        set
+        {
+            if (_showLegalMoveSuggestions == value)
+            {
+                return;
+            }
+
+            _showLegalMoveSuggestions = value;
+            OnPropertyChanged();
+            UpdateSquareHighlights();
+        }
+    }
 
     public IReadOnlyList<string> MoveHistoryEntries
     {
@@ -504,7 +521,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         foreach (var squareViewModel in _boardSquares)
         {
             var isSelected = _selectedSquare is not null && squareViewModel.Square == _selectedSquare.Value;
-            var isLegalDestination = _legalDestinationSquares.Contains(squareViewModel.Square);
+            var isLegalDestination = _showLegalMoveSuggestions
+                && _legalDestinationSquares.Contains(squareViewModel.Square);
             var isKeyboardFocused = squareViewModel.Square == _focusedSquare;
 
             squareViewModel.SetSelected(isSelected);

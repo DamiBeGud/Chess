@@ -48,8 +48,46 @@ public sealed class MainWindowViewModelTests
 
         e2.ClickCommand.Execute(null);
 
-        Assert.NotEqual(e3BeforeSelection, e3.Background);
-        Assert.NotEqual(e4BeforeSelection, e4.Background);
+        Assert.True(e3.IsLegalDestinationIndicatorVisible);
+        Assert.True(e4.IsLegalDestinationIndicatorVisible);
+        Assert.Equal(e3BeforeSelection, e3.Background);
+        Assert.Equal(e4BeforeSelection, e4.Background);
+        Assert.False(e2.IsLegalDestinationIndicatorVisible);
+    }
+
+    [Fact]
+    public void LegalDestinationIndicator_UsesConfiguredCircleStyle()
+    {
+        var viewModel = CreateViewModel();
+        var lightSquare = FindSquare(viewModel, 4, 2);
+        var darkSquare = FindSquare(viewModel, 3, 2);
+
+        Assert.InRange(lightSquare.LegalDestinationIndicatorDiameter, 12d, 48d);
+        Assert.InRange(lightSquare.LegalDestinationIndicatorOpacity, 0.4d, 0.7d);
+        Assert.Equal(lightSquare.LegalDestinationIndicatorBrush, darkSquare.LegalDestinationIndicatorBrush);
+        Assert.NotEqual(lightSquare.Background, lightSquare.LegalDestinationIndicatorBrush);
+        Assert.NotEqual(darkSquare.Background, darkSquare.LegalDestinationIndicatorBrush);
+    }
+
+    [Fact]
+    public void ShowLegalMoveSuggestions_ToggleHidesAndRestoresLegalDestinationIndicators()
+    {
+        var viewModel = CreateViewModel();
+        var e2 = FindSquare(viewModel, 4, 1);
+        var e3 = FindSquare(viewModel, 4, 2);
+        var e4 = FindSquare(viewModel, 4, 3);
+
+        e2.ClickCommand.Execute(null);
+        Assert.True(e3.IsLegalDestinationIndicatorVisible);
+        Assert.True(e4.IsLegalDestinationIndicatorVisible);
+
+        viewModel.ShowLegalMoveSuggestions = false;
+        Assert.False(e3.IsLegalDestinationIndicatorVisible);
+        Assert.False(e4.IsLegalDestinationIndicatorVisible);
+
+        viewModel.ShowLegalMoveSuggestions = true;
+        Assert.True(e3.IsLegalDestinationIndicatorVisible);
+        Assert.True(e4.IsLegalDestinationIndicatorVisible);
     }
 
     [Fact]
@@ -259,8 +297,8 @@ public sealed class MainWindowViewModelTests
         var viewModel = CreateViewModel();
         var g3 = FindSquare(viewModel, 6, 2);
         var h3 = FindSquare(viewModel, 7, 2);
-        var g3BeforeSelection = g3.Background;
-        var h3BeforeSelection = h3.Background;
+        Assert.False(g3.IsLegalDestinationIndicatorVisible);
+        Assert.False(h3.IsLegalDestinationIndicatorVisible);
 
         Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
         Assert.True(viewModel.HandleKeyboardInput(Key.Right));
@@ -276,13 +314,13 @@ public sealed class MainWindowViewModelTests
         Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
 
         Assert.Equal("Invalid move target: g3. Legal destinations from h2: h3, h4.", viewModel.FeedbackText);
-        Assert.Equal(g3BeforeSelection, g3.Background);
-        Assert.NotEqual(h3BeforeSelection, h3.Background);
+        Assert.False(g3.IsLegalDestinationIndicatorVisible);
+        Assert.True(h3.IsLegalDestinationIndicatorVisible);
 
         Assert.True(viewModel.HandleKeyboardInput(Key.Escape));
         Assert.Equal("Selection cleared.", viewModel.FeedbackText);
         Assert.Equal("Keyboard focus: g3.", viewModel.FocusedSquareText);
-        Assert.Equal(h3BeforeSelection, h3.Background);
+        Assert.False(h3.IsLegalDestinationIndicatorVisible);
     }
 
     [Fact]
@@ -290,13 +328,13 @@ public sealed class MainWindowViewModelTests
     {
         var viewModel = CreateViewModel();
         var e3 = FindSquare(viewModel, 4, 2);
-        var e3BeforeSelection = e3.Background;
+        Assert.False(e3.IsLegalDestinationIndicatorVisible);
 
         Assert.True(viewModel.HandleKeyboardInput(Key.Enter));
-        Assert.NotEqual(e3BeforeSelection, e3.Background);
+        Assert.True(e3.IsLegalDestinationIndicatorVisible);
         Assert.True(viewModel.HandleKeyboardInput(Key.Escape));
 
-        Assert.Equal(e3BeforeSelection, e3.Background);
+        Assert.False(e3.IsLegalDestinationIndicatorVisible);
         Assert.Equal("Selection cleared.", viewModel.FeedbackText);
     }
 

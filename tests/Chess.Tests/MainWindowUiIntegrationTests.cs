@@ -61,8 +61,43 @@ public sealed class MainWindowUiIntegrationTests
 
             Click(e2);
 
-            Assert.NotEqual(e3Before, e3.Background);
-            Assert.NotEqual(e4Before, e4.Background);
+            Assert.True(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
+            Assert.True(GetSquareViewModel(e4).IsLegalDestinationIndicatorVisible);
+            Assert.Equal(e3Before, e3.Background);
+            Assert.Equal(e4Before, e4.Background);
+            Assert.False(GetSquareViewModel(e2).IsLegalDestinationIndicatorVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void ShowLegalMoveSuggestionsCheckBox_TogglesIndicatorVisibility()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+
+            var toggle = FindShowLegalMoveSuggestionsCheckBox(window);
+            var e2 = FindSquareButton(window, "e2");
+            var e3 = FindSquareButton(window, "e3");
+            var e4 = FindSquareButton(window, "e4");
+
+            Click(e2);
+            Assert.True(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
+            Assert.True(GetSquareViewModel(e4).IsLegalDestinationIndicatorVisible);
+
+            toggle.IsChecked = false;
+            Assert.False(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
+            Assert.False(GetSquareViewModel(e4).IsLegalDestinationIndicatorVisible);
+
+            toggle.IsChecked = true;
+            Assert.True(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
+            Assert.True(GetSquareViewModel(e4).IsLegalDestinationIndicatorVisible);
         }
         finally
         {
@@ -474,16 +509,16 @@ public sealed class MainWindowUiIntegrationTests
             window.Focus();
 
             var e3 = FindSquareButton(window, "e3");
-            var e3BeforeSelection = e3.Background;
+            Assert.False(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
             Click(FindSquareButton(window, "e2"));
 
-            Assert.NotEqual(e3BeforeSelection, e3.Background);
+            Assert.True(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
 
             PressKey(window, Key.Escape);
 
             Assert.Equal("Selection cleared.", GetFeedbackText(window));
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
-            Assert.Equal(e3BeforeSelection, e3.Background);
+            Assert.False(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
         }
         finally
         {
@@ -502,13 +537,13 @@ public sealed class MainWindowUiIntegrationTests
             window.Focus();
 
             var e3 = FindSquareButton(window, "e3");
-            var e3BeforeSelection = e3.Background;
+            Assert.False(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
             Click(FindSquareButton(window, "e2"));
-            Assert.NotEqual(e3BeforeSelection, e3.Background);
+            Assert.True(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
 
             PressKey(window, Key.Enter);
 
-            Assert.Equal(e3BeforeSelection, e3.Background);
+            Assert.False(GetSquareViewModel(e3).IsLegalDestinationIndicatorVisible);
             Assert.Equal(string.Empty, GetFeedbackText(window));
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
         }
@@ -725,6 +760,11 @@ public sealed class MainWindowUiIntegrationTests
     private static Button FindLoadGameButton(Window window)
     {
         return Assert.IsType<Button>(window.FindControl<Button>("LoadGameButton"));
+    }
+
+    private static CheckBox FindShowLegalMoveSuggestionsCheckBox(Window window)
+    {
+        return Assert.IsType<CheckBox>(window.FindControl<CheckBox>("ShowLegalMoveSuggestionsCheckBox"));
     }
 
     private static Border FindBoardContainerBorder(Window window)

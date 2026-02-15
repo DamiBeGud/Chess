@@ -129,12 +129,23 @@
                                                 VerticalAlignment="Stretch"
                                                 HorizontalContentAlignment="Center"
                                                 VerticalContentAlignment="Center">
-                                            <Image Source="{Binding PieceImage}"
-                                                   Stretch="Uniform"
-                                                   Width="64"
-                                                   Height="64"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" />
+                                            <Grid>
+                                                <Image Source="{Binding PieceImage}"
+                                                       Stretch="Uniform"
+                                                       Width="64"
+                                                       Height="64"
+                                                       HorizontalAlignment="Center"
+                                                       VerticalAlignment="Center" />
+                                                <Ellipse HorizontalAlignment="Center"
+                                                         VerticalAlignment="Center"
+                                                         Width="{Binding LegalDestinationIndicatorDiameter}"
+                                                         Height="{Binding LegalDestinationIndicatorDiameter}"
+                                                         Fill="{Binding LegalDestinationIndicatorBrush}"
+                                                         Opacity="{Binding LegalDestinationIndicatorOpacity}"
+                                                         IsVisible="{Binding IsLegalDestinationIndicatorVisible}"
+                                                         IsHitTestVisible="False"
+                                                         ZIndex="1" />
+                                            </Grid>
                                         </Button>
                                     </DataTemplate>
                                 </ItemsControl.ItemTemplate>
@@ -213,6 +224,9 @@
                                    TextWrapping="Wrap"
                                    Opacity="0.85"
                                    FontSize="12" />
+                        <CheckBox x:Name="ShowLegalMoveSuggestionsCheckBox"
+                                  Content="Show legal move suggestions"
+                                  IsChecked="{Binding ShowLegalMoveSuggestions}" />
                     </StackPanel>
 
                     <StackPanel Grid.Row="3"
