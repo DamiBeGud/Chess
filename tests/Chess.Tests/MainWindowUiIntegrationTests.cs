@@ -10,6 +10,7 @@ using Avalonia.Controls;
 using Avalonia.Headless;
 using Avalonia.Headless.XUnit;
 using Avalonia.Input;
+using Avalonia.Media;
 using Avalonia.VisualTree;
 using Chess.AppCore;
 using Chess.Domain;
@@ -244,8 +245,79 @@ public sealed class MainWindowUiIntegrationTests
             window.UpdateLayout();
 
             Assert.Equal(
-                new[] { "1. e2-e4", "1... e7-e5" },
-                GetMoveHistoryEntries(window));
+                new[] { "1. e2-e4", "1. e7-e5" },
+                GetMoveHistoryEntries(window).Select(entry => entry.ToString()));
+            Assert.Equal(PieceColor.White, GetMoveHistoryEntries(window)[0].Side);
+            Assert.Equal(PieceColor.Black, GetMoveHistoryEntries(window)[1].Side);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MoveHistory_RendersStructuredEntryShapeWithIconPrefixAndNotation()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            Click(FindSquareButton(window, "e2"));
+            Click(FindSquareButton(window, "e4"));
+            Click(FindSquareButton(window, "e7"));
+            Click(FindSquareButton(window, "e5"));
+            window.UpdateLayout();
+
+            var entries = GetMoveHistoryEntries(window);
+            Assert.Equal(2, entries.Count);
+            var whiteEntry = entries[0];
+            var blackEntry = entries[1];
+
+            Assert.Equal("1.", whiteEntry.MovePrefix);
+            Assert.Equal("e2-e4", whiteEntry.Notation);
+            Assert.Equal(PieceType.Pawn, whiteEntry.MovedPieceType);
+            Assert.Equal(PieceColor.White, whiteEntry.Side);
+            Assert.NotNull(whiteEntry.PieceIconImage);
+            Assert.Equal("#F7F3EA", whiteEntry.SideColorHex);
+
+            Assert.Equal("1.", blackEntry.MovePrefix);
+            Assert.Equal("e7-e5", blackEntry.Notation);
+            Assert.Equal(PieceType.Pawn, blackEntry.MovedPieceType);
+            Assert.Equal(PieceColor.Black, blackEntry.Side);
+            Assert.NotNull(blackEntry.PieceIconImage);
+            Assert.Equal("#2B2B2B", blackEntry.SideColorHex);
+
+            var prefixTexts = window.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(textBlock => textBlock.Classes.Contains("move-history-prefix"))
+                .Select(textBlock => textBlock.Text)
+                .ToArray();
+            var notationTexts = window.GetVisualDescendants()
+                .OfType<TextBlock>()
+                .Where(textBlock => textBlock.Classes.Contains("move-history-notation"))
+                .Select(textBlock => textBlock.Text)
+                .ToArray();
+            var iconBorders = window.GetVisualDescendants()
+                .OfType<Border>()
+                .Where(border => border.Classes.Contains("move-history-piece-icon"))
+                .ToArray();
+            var iconBadgeColors = iconBorders
+                .Select(border => border.Background)
+                .OfType<ISolidColorBrush>()
+                .Select(brush => brush.Color.ToString())
+                .ToArray();
+
+            Assert.Contains("1.", prefixTexts);
+            Assert.Contains("e2-e4", notationTexts);
+            Assert.Equal(2, prefixTexts.Count(prefix => string.Equals(prefix, "1.", StringComparison.Ordinal)));
+            Assert.Contains("e7-e5", notationTexts);
+            Assert.Equal(2, iconBorders.Length);
+            Assert.Contains(iconBadgeColors, color => string.Equals(color, "#FFF7F3EA", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(iconBadgeColors, color => string.Equals(color, "#FF2B2B2B", StringComparison.OrdinalIgnoreCase));
         }
         finally
         {
@@ -989,17 +1061,15 @@ public sealed class MainWindowUiIntegrationTests
         return $"{(char)('a' + file)}{rank}";
     }
 
-    private static IReadOnlyList<string> GetMoveHistoryEntries(Window window)
+    private static IReadOnlyList<MoveHistoryEntryViewModel> GetMoveHistoryEntries(Window window)
     {
         var itemsControl = window.FindControl<ItemsControl>("MoveHistoryItemsControl");
         Assert.NotNull(itemsControl);
 
-        var items = Assert.IsAssignableFrom<IEnumerable>(itemsControl!.ItemsSource ?? Array.Empty<string>());
+        var items = Assert.IsAssignableFrom<IEnumerable>(itemsControl!.ItemsSource ?? Array.Empty<MoveHistoryEntryViewModel>());
         return items
             .Cast<object?>()
-            .Select(item => item?.ToString())
-            .Where(text => !string.IsNullOrWhiteSpace(text))
-            .Cast<string>()
+            .OfType<MoveHistoryEntryViewModel>()
             .ToArray();
     }
 

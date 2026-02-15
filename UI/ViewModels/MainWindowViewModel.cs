@@ -39,7 +39,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _lastActionText = string.Empty;
     private string _feedbackText = string.Empty;
     private string _focusedSquareText = string.Empty;
-    private IReadOnlyList<string> _moveHistoryEntries = Array.Empty<string>();
+    private IReadOnlyList<MoveHistoryEntryViewModel> _moveHistoryEntries = Array.Empty<MoveHistoryEntryViewModel>();
     private string _persistenceFilePath = BuildDefaultPersistenceFilePath();
     private bool _showLegalMoveSuggestions = true;
     private bool _isPlayVsAiEnabled;
@@ -173,7 +173,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    public IReadOnlyList<string> MoveHistoryEntries
+    public IReadOnlyList<MoveHistoryEntryViewModel> MoveHistoryEntries
     {
         get => _moveHistoryEntries;
         private set
@@ -781,20 +781,28 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         };
     }
 
-    private static IReadOnlyList<string> BuildMoveHistoryEntries(IReadOnlyList<Move> moveHistory)
+    private IReadOnlyList<MoveHistoryEntryViewModel> BuildMoveHistoryEntries(IReadOnlyList<Move> moveHistory)
     {
         if (moveHistory.Count == 0)
         {
-            return Array.Empty<string>();
+            return Array.Empty<MoveHistoryEntryViewModel>();
         }
 
-        var entries = new List<string>(moveHistory.Count);
+        var entries = new List<MoveHistoryEntryViewModel>(moveHistory.Count);
 
         for (var index = 0; index < moveHistory.Count; index++)
         {
+            var move = moveHistory[index];
             var moveNumber = (index / 2) + 1;
-            var movePrefix = index % 2 == 0 ? $"{moveNumber}. " : $"{moveNumber}... ";
-            entries.Add($"{movePrefix}{BuildMoveNotation(moveHistory[index])}");
+            var movePrefix = $"{moveNumber}.";
+            var resolvedPieceAsset = _pieceAssetResolver.Resolve(move.MovedPiece);
+            entries.Add(
+                new MoveHistoryEntryViewModel(
+                    movePrefix,
+                    move.MovedPiece.Type,
+                    move.MovedPiece.Color,
+                    BuildMoveNotation(move),
+                    resolvedPieceAsset));
         }
 
         return entries;

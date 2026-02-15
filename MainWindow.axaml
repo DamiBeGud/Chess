@@ -307,10 +307,41 @@
                                 <ItemsControl x:Name="MoveHistoryItemsControl"
                                               ItemsSource="{Binding MoveHistoryEntries}">
                                     <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="x:String">
-                                            <TextBlock Text="{Binding .}"
-                                                       TextWrapping="Wrap"
-                                                       FontFamily="Consolas, Menlo, monospace" />
+                                        <DataTemplate x:DataType="vm:MoveHistoryEntryViewModel">
+                                            <Grid ColumnDefinitions="Auto,Auto,*"
+                                                  ColumnSpacing="8">
+                                                <TextBlock Classes="move-history-prefix"
+                                                           Grid.Column="0"
+                                                           Text="{Binding MovePrefix}"
+                                                           VerticalAlignment="Center"
+                                                           FontWeight="SemiBold"
+                                                           FontFamily="Consolas, Menlo, monospace" />
+                                                <Border Classes="move-history-piece-icon"
+                                                        Grid.Column="1"
+                                                        Width="24"
+                                                        Height="24"
+                                                        CornerRadius="4"
+                                                        BorderThickness="1"
+                                                        BorderBrush="{Binding SideBorderBrush}"
+                                                        Background="{Binding SideColorBrush}"
+                                                        VerticalAlignment="Center"
+                                                        HorizontalAlignment="Center">
+                                                    <Grid>
+                                                        <Image Source="{Binding PieceIconImage}"
+                                                               Stretch="Uniform"
+                                                               Width="16"
+                                                               Height="16"
+                                                               HorizontalAlignment="Center"
+                                                               VerticalAlignment="Center" />
+                                                    </Grid>
+                                                </Border>
+                                                <TextBlock Classes="move-history-notation"
+                                                           Grid.Column="2"
+                                                           Text="{Binding Notation}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="Wrap"
+                                                           FontFamily="Consolas, Menlo, monospace" />
+                                            </Grid>
                                         </DataTemplate>
                                     </ItemsControl.ItemTemplate>
                                 </ItemsControl>

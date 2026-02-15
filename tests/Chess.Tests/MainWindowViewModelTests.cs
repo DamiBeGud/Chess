@@ -152,7 +152,15 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Last action: White moved Pawn from e2 to e4.", viewModel.LastActionText);
         AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
         AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
-        Assert.Equal(new[] { "1. e2-e4" }, viewModel.MoveHistoryEntries);
+        var entry = Assert.Single(viewModel.MoveHistoryEntries);
+        AssertMoveHistoryEntry(
+            entry,
+            expectedPrefix: "1.",
+            expectedPieceType: PieceType.Pawn,
+            expectedSide: PieceColor.White,
+            expectedNotation: "e2-e4",
+            expectedIconStem: "white-pawn",
+            expectedSideColorHex: "#F7F3EA");
         Assert.False(viewModel.IsMoveHistoryEmpty);
     }
 
@@ -171,8 +179,10 @@ public sealed class MainWindowViewModelTests
         e5.ClickCommand.Execute(null);
 
         Assert.Equal(
-            new[] { "1. e2-e4", "1... e7-e5" },
-            viewModel.MoveHistoryEntries);
+            new[] { "1. e2-e4", "1. e7-e5" },
+            viewModel.MoveHistoryEntries.Select(entry => entry.ToString()));
+        Assert.Equal(PieceColor.White, viewModel.MoveHistoryEntries[0].Side);
+        Assert.Equal(PieceColor.Black, viewModel.MoveHistoryEntries[1].Side);
         Assert.False(viewModel.IsMoveHistoryEmpty);
     }
 
@@ -181,7 +191,7 @@ public sealed class MainWindowViewModelTests
     {
         var preloadedState = CreateState(
             GameStatus.InProgress,
-            PieceColor.White,
+            PieceColor.Black,
             new List<Move>
             {
                 new(
@@ -204,7 +214,13 @@ public sealed class MainWindowViewModelTests
                     To: new Square(0, 0),
                     MovedPiece: new Piece(PieceType.Pawn, PieceColor.Black, HasMoved: true),
                     CapturedPiece: new Piece(PieceType.Rook, PieceColor.White, HasMoved: true),
-                    PromotionPieceType: PieceType.Queen)
+                    PromotionPieceType: PieceType.Queen),
+                new(
+                    From: new Square(4, 4),
+                    To: new Square(3, 5),
+                    MovedPiece: new Piece(PieceType.Pawn, PieceColor.White, HasMoved: true),
+                    CapturedPiece: new Piece(PieceType.Pawn, PieceColor.Black, HasMoved: true),
+                    IsEnPassant: true)
             },
             new PiecePlacement(new Square(6, 0), new Piece(PieceType.King, PieceColor.White, HasMoved: true)),
             new PiecePlacement(new Square(2, 7), new Piece(PieceType.King, PieceColor.Black, HasMoved: true)));
@@ -213,9 +229,49 @@ public sealed class MainWindowViewModelTests
         var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver());
 
         Assert.Equal(
-            new[] { "1. O-O", "1... O-O-O", "2. e4xd5", "2... b2xa1=Q" },
-            viewModel.MoveHistoryEntries);
+            new[] { "1. O-O", "1. O-O-O", "2. e4xd5", "2. b2xa1=Q", "3. e5xd6 e.p." },
+            viewModel.MoveHistoryEntries.Select(entry => entry.ToString()));
+        Assert.Equal(PieceType.King, viewModel.MoveHistoryEntries[0].MovedPieceType);
+        Assert.Equal(PieceType.King, viewModel.MoveHistoryEntries[1].MovedPieceType);
+        Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[2].MovedPieceType);
+        Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[3].MovedPieceType);
+        Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[4].MovedPieceType);
         Assert.False(viewModel.IsMoveHistoryEmpty);
+    }
+
+    [Fact]
+    public void Constructor_WhenMoveHistoryAssetUnavailable_UsesDeterministicAssetFallback()
+    {
+        var preloadedState = CreateState(
+            GameStatus.InProgress,
+            PieceColor.Black,
+            new List<Move>
+            {
+                new(
+                    From: new Square(1, 0),
+                    To: new Square(2, 2),
+                    MovedPiece: new Piece(PieceType.Knight, PieceColor.White, HasMoved: true)),
+                new(
+                    From: new Square(6, 7),
+                    To: new Square(5, 5),
+                    MovedPiece: new Piece(PieceType.Knight, PieceColor.Black, HasMoved: true))
+            },
+            new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+            new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)));
+
+        var session = new StubGameSessionService(preloadedState);
+        var viewModel = new MainWindowViewModel(session, new PieceAssetResolver(_ => null));
+
+        var whiteMove = viewModel.MoveHistoryEntries[0];
+        var blackMove = viewModel.MoveHistoryEntries[1];
+        Assert.True(whiteMove.HasPieceIconImage);
+        Assert.True(blackMove.HasPieceIconImage);
+        Assert.True(whiteMove.IsUsingDeterministicFallbackIcon);
+        Assert.True(blackMove.IsUsingDeterministicFallbackIcon);
+        Assert.EndsWith("/white-knight.png", whiteMove.PieceIconAssetUri, StringComparison.OrdinalIgnoreCase);
+        Assert.EndsWith("/black-knight.png", blackMove.PieceIconAssetUri, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal("#F7F3EA", whiteMove.SideColorHex);
+        Assert.Equal("#2B2B2B", blackMove.SideColorHex);
     }
 
     [Fact]
@@ -550,6 +606,25 @@ public sealed class MainWindowViewModelTests
     {
         Assert.NotNull(squareViewModel.PieceImage);
         Assert.Contains($"/{expectedAssetStem}.", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertMoveHistoryEntry(
+        MoveHistoryEntryViewModel entry,
+        string expectedPrefix,
+        PieceType expectedPieceType,
+        PieceColor expectedSide,
+        string expectedNotation,
+        string expectedIconStem,
+        string expectedSideColorHex)
+    {
+        Assert.Equal(expectedPrefix, entry.MovePrefix);
+        Assert.Equal(expectedPieceType, entry.MovedPieceType);
+        Assert.Equal(expectedSide, entry.Side);
+        Assert.Equal(expectedNotation, entry.Notation);
+        Assert.Equal(expectedSideColorHex, entry.SideColorHex);
+        Assert.True(entry.HasPieceIconImage);
+        Assert.False(entry.IsUsingDeterministicFallbackIcon);
+        Assert.Contains($"/{expectedIconStem}.", entry.PieceIconAssetUri, StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMilliseconds = 3000)
