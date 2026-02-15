@@ -33,6 +33,7 @@ public sealed class MainWindowViewModelTests
         var e7 = FindSquare(viewModel, 4, 6);
         AssertSquareHasPieceAsset(e2, "white-pawn");
         AssertSquareHasPieceAsset(e7, "black-pawn");
+        AssertNoLastMoveHighlight(viewModel);
     }
 
     [Fact]
@@ -152,6 +153,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Last action: White moved Pawn from e2 to e4.", viewModel.LastActionText);
         AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
         AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
+        AssertLastMoveHighlight(viewModel, "e2", "e4");
         var entry = Assert.Single(viewModel.MoveHistoryEntries);
         AssertMoveHistoryEntry(
             entry,
@@ -183,6 +185,7 @@ public sealed class MainWindowViewModelTests
             viewModel.MoveHistoryEntries.Select(entry => entry.ToString()));
         Assert.Equal(PieceColor.White, viewModel.MoveHistoryEntries[0].Side);
         Assert.Equal(PieceColor.Black, viewModel.MoveHistoryEntries[1].Side);
+        AssertLastMoveHighlight(viewModel, "e7", "e5");
         Assert.False(viewModel.IsMoveHistoryEmpty);
     }
 
@@ -236,6 +239,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[2].MovedPieceType);
         Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[3].MovedPieceType);
         Assert.Equal(PieceType.Pawn, viewModel.MoveHistoryEntries[4].MovedPieceType);
+        AssertLastMoveHighlight(viewModel, "e5", "d6");
         Assert.False(viewModel.IsMoveHistoryEmpty);
     }
 
@@ -345,6 +349,7 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Last action: White moved Pawn from f2 to f3.", viewModel.LastActionText);
         AssertSquareHasNoPieceAsset(FindSquare(viewModel, 5, 1));
         AssertSquareHasPieceAsset(FindSquare(viewModel, 5, 2), "white-pawn");
+        AssertLastMoveHighlight(viewModel, "f2", "f3");
     }
 
     [Fact]
@@ -420,6 +425,7 @@ public sealed class MainWindowViewModelTests
             Assert.Equal(string.Empty, viewModel.FeedbackText);
             AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
             AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
+            AssertLastMoveHighlight(viewModel, "e2", "e4");
         }
         finally
         {
@@ -471,6 +477,9 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(2, viewModel.MoveHistoryEntries.Count);
         Assert.StartsWith("Last action: AI (Black) moved ", viewModel.LastActionText, StringComparison.Ordinal);
         Assert.Equal(string.Empty, viewModel.FeedbackText);
+        var highlightedSquares = GetLastMoveHighlightCoordinates(viewModel);
+        Assert.Equal(2, highlightedSquares.Count);
+        Assert.False(highlightedSquares.SequenceEqual(new[] { "e2", "e4" }, StringComparer.Ordinal));
     }
 
     [Fact]
@@ -486,6 +495,20 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
         Assert.Single(viewModel.MoveHistoryEntries);
         Assert.StartsWith("Last action: AI (White) moved ", viewModel.LastActionText, StringComparison.Ordinal);
+        Assert.Equal(2, GetLastMoveHighlightCoordinates(viewModel).Count);
+    }
+
+    [Fact]
+    public void StartNewGame_ClearsLastMoveHighlight()
+    {
+        var viewModel = CreateViewModel();
+        FindSquare(viewModel, 4, 1).ClickCommand.Execute(null);
+        FindSquare(viewModel, 4, 3).ClickCommand.Execute(null);
+        AssertLastMoveHighlight(viewModel, "e2", "e4");
+
+        viewModel.StartNewGame();
+
+        AssertNoLastMoveHighlight(viewModel);
     }
 
     [Fact]
@@ -606,6 +629,29 @@ public sealed class MainWindowViewModelTests
     {
         Assert.NotNull(squareViewModel.PieceImage);
         Assert.Contains($"/{expectedAssetStem}.", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertLastMoveHighlight(MainWindowViewModel viewModel, params string[] expectedCoordinates)
+    {
+        var expected = expectedCoordinates
+            .OrderBy(coordinate => coordinate, StringComparer.Ordinal)
+            .ToArray();
+        var actual = GetLastMoveHighlightCoordinates(viewModel);
+        Assert.Equal(expected, actual);
+    }
+
+    private static void AssertNoLastMoveHighlight(MainWindowViewModel viewModel)
+    {
+        Assert.Empty(GetLastMoveHighlightCoordinates(viewModel));
+    }
+
+    private static IReadOnlyList<string> GetLastMoveHighlightCoordinates(MainWindowViewModel viewModel)
+    {
+        return viewModel.BoardSquares
+            .Where(square => square.IsLastMoveHighlighted)
+            .Select(square => square.CoordinateLabel)
+            .OrderBy(coordinate => coordinate, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static void AssertMoveHistoryEntry(

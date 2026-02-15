@@ -149,6 +149,7 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal(string.Empty, GetFeedbackText(window));
             AssertSquareHasNoPieceAsset(e2);
             AssertSquareHasPieceAsset(e4, "white-pawn");
+            Assert.Equal(new[] { "e2", "e4" }, GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -216,6 +217,7 @@ public sealed class MainWindowUiIntegrationTests
             AssertSquareHasPieceAsset(e4, "white-pawn");
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
+            Assert.Equal(new[] { "e2", "e4" }, GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -249,6 +251,7 @@ public sealed class MainWindowUiIntegrationTests
                 GetMoveHistoryEntries(window).Select(entry => entry.ToString()));
             Assert.Equal(PieceColor.White, GetMoveHistoryEntries(window)[0].Side);
             Assert.Equal(PieceColor.Black, GetMoveHistoryEntries(window)[1].Side);
+            Assert.Equal(new[] { "e5", "e7" }, GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -457,6 +460,7 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal(string.Empty, GetFeedbackText(window));
             AssertSquareHasNoPieceAsset(sourceButton);
             AssertSquareHasPieceAsset(e4, "white-pawn");
+            Assert.Equal(new[] { "e2", "e4" }, GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -489,6 +493,7 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal(string.Empty, GetFeedbackText(window));
             AssertSquareHasNoPieceAsset(sourceButton);
             AssertSquareHasPieceAsset(f3, "white-pawn");
+            Assert.Equal(new[] { "f2", "f3" }, GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -515,6 +520,7 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             AssertSquareHasNoPieceAsset(e2);
             AssertSquareHasPieceAsset(e4, "white-pawn");
+            Assert.Equal(new[] { "e2", "e4" }, GetLastMoveHighlightedSquareCoordinates(window));
 
             startNewGameButton.Focus();
             PressKeyOnHeadlessWindow(window, Key.Enter, PhysicalKey.Enter);
@@ -526,6 +532,7 @@ public sealed class MainWindowUiIntegrationTests
             AssertSquareHasPieceAsset(e2, "white-pawn");
             AssertSquareHasNoPieceAsset(e4);
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
+            Assert.Empty(GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -552,6 +559,7 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             AssertSquareHasNoPieceAsset(e2);
             AssertSquareHasPieceAsset(e4, "white-pawn");
+            Assert.Equal(new[] { "e2", "e4" }, GetLastMoveHighlightedSquareCoordinates(window));
 
             startNewGameButton.Focus();
             PressKeyOnHeadlessWindow(window, Key.Space, PhysicalKey.Space);
@@ -563,6 +571,7 @@ public sealed class MainWindowUiIntegrationTests
             AssertSquareHasPieceAsset(e2, "white-pawn");
             AssertSquareHasNoPieceAsset(e4);
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
+            Assert.Empty(GetLastMoveHighlightedSquareCoordinates(window));
         }
         finally
         {
@@ -1070,6 +1079,16 @@ public sealed class MainWindowUiIntegrationTests
         return items
             .Cast<object?>()
             .OfType<MoveHistoryEntryViewModel>()
+            .ToArray();
+    }
+
+    private static IReadOnlyList<string> GetLastMoveHighlightedSquareCoordinates(Window window)
+    {
+        return GetBoardSquareButtons(window)
+            .Select(GetSquareViewModel)
+            .Where(square => square.IsLastMoveHighlighted)
+            .Select(square => square.CoordinateLabel)
+            .OrderBy(coordinate => coordinate, StringComparer.Ordinal)
             .ToArray();
     }
 

@@ -506,10 +506,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         var currentState = _gameSessionService.CurrentGameState;
         var piecesBySquare = currentState.Pieces.ToDictionary(placement => placement.Square, placement => placement.Piece);
+        var hasLastMove = TryGetLastMoveSquares(currentState.MoveHistory, out var lastMoveFromSquare, out var lastMoveToSquare);
 
         foreach (var squareViewModel in _boardSquares)
         {
             squareViewModel.SetPiece(piecesBySquare.TryGetValue(squareViewModel.Square, out var piece) ? piece : null);
+            squareViewModel.SetLastMoveHighlighted(
+                hasLastMove
+                && (squareViewModel.Square == lastMoveFromSquare || squareViewModel.Square == lastMoveToSquare));
         }
 
         GameStatusText = BuildGameStatusText(currentState);
@@ -742,6 +746,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         piece = null;
         return false;
+    }
+
+    private static bool TryGetLastMoveSquares(IReadOnlyList<Move> moveHistory, out Square fromSquare, out Square toSquare)
+    {
+        if (moveHistory.Count == 0)
+        {
+            fromSquare = default;
+            toSquare = default;
+            return false;
+        }
+
+        var lastMove = moveHistory[^1];
+        fromSquare = lastMove.From;
+        toSquare = lastMove.To;
+        return true;
     }
 
     private List<BoardSquareViewModel> BuildBoardSquares()

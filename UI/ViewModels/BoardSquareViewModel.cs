@@ -14,6 +14,8 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     private static readonly IBrush LightSquareBrush = Brush.Parse("#F2E4CB");
     private static readonly IBrush DarkSquareBrush = Brush.Parse("#9E6B43");
     private static readonly IBrush SelectedSquareBrush = Brush.Parse("#F6D76A");
+    private static readonly IBrush LastMoveHighlightOnLightSquareBrush = Brush.Parse("#e4c45b");
+    private static readonly IBrush LastMoveHighlightOnDarkSquareBrush = Brush.Parse("#b08853");
     private static readonly IBrush LegalMoveIndicatorBrush = Brush.Parse("#3e863e");
     private const double LegalMoveIndicatorOpacityValue = 0.6d;
     private const double LegalMoveIndicatorDiameterValue = 40d;
@@ -30,6 +32,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     private bool _isSelected;
     private bool _isLegalDestination;
     private bool _isKeyboardFocused;
+    private bool _isLastMoveHighlighted;
 
     public BoardSquareViewModel(Square square, ICommand clickCommand, IPieceAssetResolver pieceAssetResolver)
     {
@@ -61,9 +64,13 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     public IBrush Background =>
         _isSelected
             ? SelectedSquareBrush
-            : IsLightSquare
-                ? LightSquareBrush
-                : DarkSquareBrush;
+            : _isLastMoveHighlighted
+                ? IsLightSquare
+                    ? LastMoveHighlightOnLightSquareBrush
+                    : LastMoveHighlightOnDarkSquareBrush
+                : IsLightSquare
+                    ? LightSquareBrush
+                    : DarkSquareBrush;
 
     public bool IsLegalDestinationIndicatorVisible => _isLegalDestination && !_isSelected;
 
@@ -76,6 +83,8 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     public IBrush BorderBrush => _isKeyboardFocused ? FocusedBorderBrush : DefaultBorderBrush;
 
     public Thickness BorderThickness => _isKeyboardFocused ? FocusedBorderThickness : DefaultBorderThickness;
+
+    public bool IsLastMoveHighlighted => _isLastMoveHighlighted;
 
     public string SquareDescription => _piece is null
         ? $"{CoordinateLabel}: empty square"
@@ -129,6 +138,18 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
         _isKeyboardFocused = isKeyboardFocused;
         OnPropertyChanged(nameof(BorderBrush));
         OnPropertyChanged(nameof(BorderThickness));
+    }
+
+    public void SetLastMoveHighlighted(bool isLastMoveHighlighted)
+    {
+        if (_isLastMoveHighlighted == isLastMoveHighlighted)
+        {
+            return;
+        }
+
+        _isLastMoveHighlighted = isLastMoveHighlighted;
+        OnPropertyChanged(nameof(IsLastMoveHighlighted));
+        OnPropertyChanged(nameof(Background));
     }
 
     private void SetPieceAsset(ResolvedPieceAsset? resolvedAsset)
