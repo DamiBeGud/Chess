@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input;
 using Avalonia.Media;
+using Chess.AI;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
@@ -359,10 +360,98 @@ public sealed class MainWindowViewModelTests
         }
     }
 
+    [Fact]
+    public async Task PlayVsAi_AfterHumanMove_AiRespondsAutomatically()
+    {
+        var viewModel = CreateAiEnabledViewModel();
+        viewModel.IsPlayVsAiEnabled = true;
+        viewModel.AiControlledColor = PieceColor.Black;
+        viewModel.AiSearchDepth = 1;
+
+        FindSquare(viewModel, 4, 1).ClickCommand.Execute(null);
+        FindSquare(viewModel, 4, 3).ClickCommand.Execute(null);
+
+        await WaitForConditionAsync(() => viewModel.MoveHistoryEntries.Count >= 2);
+
+        Assert.Equal("Status: In progress. Side to move: White.", viewModel.GameStatusText);
+        Assert.Equal(2, viewModel.MoveHistoryEntries.Count);
+        Assert.StartsWith("Last action: AI (Black) moved ", viewModel.LastActionText, StringComparison.Ordinal);
+        Assert.Equal(string.Empty, viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public async Task PlayVsAi_WhenAiIsWhite_MakesOpeningMove()
+    {
+        var viewModel = CreateAiEnabledViewModel();
+        viewModel.AiControlledColor = PieceColor.White;
+        viewModel.AiSearchDepth = 1;
+        viewModel.IsPlayVsAiEnabled = true;
+
+        await WaitForConditionAsync(() => viewModel.MoveHistoryEntries.Count > 0);
+
+        Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
+        Assert.Single(viewModel.MoveHistoryEntries);
+        Assert.StartsWith("Last action: AI (White) moved ", viewModel.LastActionText, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void PlayVsAi_WhenUnavailable_DoesNotEnableAndShowsFeedback()
+    {
+        var viewModel = CreateViewModel();
+
+        viewModel.IsPlayVsAiEnabled = true;
+
+        Assert.False(viewModel.IsAiAvailable);
+        Assert.False(viewModel.IsPlayVsAiEnabled);
+        Assert.Equal("Play vs AI is unavailable in this configuration.", viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public async Task PlayVsAi_DisablingMode_CancelsInFlightAiTurn()
+    {
+        var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
+        var slowAiTurnService = new SlowCancellableAiTurnService();
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver(), slowAiTurnService);
+        viewModel.AiControlledColor = PieceColor.White;
+        viewModel.IsPlayVsAiEnabled = true;
+
+        await slowAiTurnService.Started;
+        viewModel.IsPlayVsAiEnabled = false;
+
+        await WaitForConditionAsync(() => !viewModel.IsAiThinking);
+
+        Assert.True(slowAiTurnService.CancellationObserved);
+        Assert.False(viewModel.IsPlayVsAiEnabled);
+    }
+
+    [Fact]
+    public async Task PlayVsAi_Requeues_WhenAiTurnReturnsNoMoveAndStillEligible()
+    {
+        var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
+        var requeueProbeService = new RequeueProbeAiTurnService(maxRequests: 2);
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver(), requeueProbeService);
+        viewModel.AiControlledColor = PieceColor.White;
+        viewModel.IsPlayVsAiEnabled = true;
+
+        await WaitForConditionAsync(() => requeueProbeService.TryPlayTurnCallCount >= 2);
+
+        Assert.Equal(2, requeueProbeService.TryPlayTurnCallCount);
+    }
+
     private static MainWindowViewModel CreateViewModel()
     {
         var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
         return new MainWindowViewModel(session, CreateTestAssetResolver());
+    }
+
+    private static MainWindowViewModel CreateAiEnabledViewModel()
+    {
+        var engine = new ChessGameEngine();
+        var session = new GameSessionService(engine, new JsonGameStateStore());
+        var evaluator = new MaterialMobilityPositionEvaluator(engine);
+        var selector = new NegamaxAiMoveSelector(engine, evaluator);
+        var aiTurnService = new AiTurnService(session, selector);
+        return new MainWindowViewModel(session, CreateTestAssetResolver(), aiTurnService);
     }
 
     private static IPieceAssetResolver CreateTestAssetResolver()
@@ -425,6 +514,20 @@ public sealed class MainWindowViewModelTests
         Assert.Contains($"/{expectedAssetStem}.", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMilliseconds = 3000)
+    {
+        var startedAt = DateTime.UtcNow;
+        while (!condition())
+        {
+            if ((DateTime.UtcNow - startedAt).TotalMilliseconds > timeoutMilliseconds)
+            {
+                throw new TimeoutException("Timed out waiting for expected condition.");
+            }
+
+            await Task.Delay(20);
+        }
+    }
+
     private sealed class StubGameSessionService : IGameSessionService
     {
         private GameState _currentGameState;
@@ -462,6 +565,67 @@ public sealed class MainWindowViewModelTests
         public Task<GameState> LoadAsync(string filePath, CancellationToken cancellationToken = default)
         {
             return Task.FromResult(_currentGameState);
+        }
+    }
+
+    private sealed class SlowCancellableAiTurnService : IAiTurnService
+    {
+        private readonly TaskCompletionSource<bool> _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
+        public bool CancellationObserved { get; private set; }
+
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return true;
+        }
+
+        public async Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            _started.TrySetResult(true);
+
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                return null;
+            }
+            catch (OperationCanceledException)
+            {
+                CancellationObserved = true;
+                throw;
+            }
+        }
+    }
+
+    private sealed class RequeueProbeAiTurnService : IAiTurnService
+    {
+        private readonly int _maxRequests;
+        private int _tryPlayTurnCallCount;
+
+        public RequeueProbeAiTurnService(int maxRequests)
+        {
+            _maxRequests = maxRequests;
+        }
+
+        public int TryPlayTurnCallCount => Volatile.Read(ref _tryPlayTurnCallCount);
+
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return TryPlayTurnCallCount < _maxRequests;
+        }
+
+        public async Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            Interlocked.Increment(ref _tryPlayTurnCallCount);
+            await Task.Delay(30, cancellationToken);
+            return null;
         }
     }
 }

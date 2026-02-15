@@ -21,8 +21,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private static readonly Square DefaultKeyboardFocusSquare = new(4, 1);
     private static readonly IReadOnlyList<string> DefaultFileCoordinates = BuildFileCoordinates();
     private static readonly IReadOnlyList<string> DefaultRankCoordinates = BuildRankCoordinates();
+    private static readonly IReadOnlyList<PieceColor> DefaultAiColors =
+    [
+        PieceColor.Black,
+        PieceColor.White
+    ];
+    private static readonly IReadOnlyList<int> DefaultAiSearchDepths = [1, 2];
 
     private readonly IGameSessionService _gameSessionService;
+    private readonly IAiTurnService _aiTurnService;
     private readonly IPieceAssetResolver _pieceAssetResolver;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
     private readonly HashSet<Square> _legalDestinationSquares = [];
@@ -34,18 +41,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _focusedSquareText = string.Empty;
     private IReadOnlyList<string> _moveHistoryEntries = Array.Empty<string>();
     private string _persistenceFilePath = BuildDefaultPersistenceFilePath();
+    private bool _isPlayVsAiEnabled;
+    private PieceColor _aiControlledColor = PieceColor.Black;
+    private int _aiSearchDepth = 2;
+    private bool _isAiTurnInProgress;
+    private readonly object _aiTurnSyncRoot = new();
+    private CancellationTokenSource? _aiTurnCancellationSource;
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
-        : this(gameSessionService, new PieceAssetResolver())
+        : this(gameSessionService, new PieceAssetResolver(), new NoOpAiTurnService())
+    {
+    }
+
+    public MainWindowViewModel(IGameSessionService gameSessionService, IAiTurnService aiTurnService)
+        : this(gameSessionService, new PieceAssetResolver(), aiTurnService)
     {
     }
 
     public MainWindowViewModel(IGameSessionService gameSessionService, IPieceAssetResolver pieceAssetResolver)
+        : this(gameSessionService, pieceAssetResolver, new NoOpAiTurnService())
+    {
+    }
+
+    public MainWindowViewModel(
+        IGameSessionService gameSessionService,
+        IPieceAssetResolver pieceAssetResolver,
+        IAiTurnService aiTurnService)
     {
         System.ArgumentNullException.ThrowIfNull(gameSessionService);
         System.ArgumentNullException.ThrowIfNull(pieceAssetResolver);
+        System.ArgumentNullException.ThrowIfNull(aiTurnService);
         _gameSessionService = gameSessionService;
         _pieceAssetResolver = pieceAssetResolver;
+        _aiTurnService = aiTurnService;
 
         var squares = BuildBoardSquares();
         _boardSquares = new ReadOnlyCollection<BoardSquareViewModel>(squares);
@@ -146,6 +174,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsMoveHistoryEmpty => MoveHistoryEntries.Count == 0;
 
+    public IReadOnlyList<PieceColor> AvailableAiColors => DefaultAiColors;
+
+    public IReadOnlyList<int> AvailableAiSearchDepths => DefaultAiSearchDepths;
+
+    public bool IsAiThinking => _isAiTurnInProgress;
+
+    public bool IsAiAvailable => _aiTurnService is not NoOpAiTurnService;
+
     public ICommand NewGameCommand { get; }
 
     public ICommand SaveGameCommand { get; }
@@ -167,14 +203,84 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
+    public bool IsPlayVsAiEnabled
+    {
+        get => _isPlayVsAiEnabled;
+        set
+        {
+            if (value && !IsAiAvailable)
+            {
+                FeedbackText = "Play vs AI is unavailable in this configuration.";
+                return;
+            }
+
+            if (_isPlayVsAiEnabled == value)
+            {
+                return;
+            }
+
+            if (!value)
+            {
+                CancelInFlightAiTurn();
+            }
+
+            _isPlayVsAiEnabled = value;
+            OnPropertyChanged();
+
+            if (_isPlayVsAiEnabled)
+            {
+                QueueAiTurnIfNeeded();
+            }
+        }
+    }
+
+    public PieceColor AiControlledColor
+    {
+        get => _aiControlledColor;
+        set
+        {
+            if (_aiControlledColor == value)
+            {
+                return;
+            }
+
+            _aiControlledColor = value;
+            OnPropertyChanged();
+
+            if (IsPlayVsAiEnabled)
+            {
+                CancelInFlightAiTurn();
+                QueueAiTurnIfNeeded();
+            }
+        }
+    }
+
+    public int AiSearchDepth
+    {
+        get => _aiSearchDepth;
+        set
+        {
+            var boundedDepth = Math.Clamp(value, 1, 2);
+            if (_aiSearchDepth == boundedDepth)
+            {
+                return;
+            }
+
+            _aiSearchDepth = boundedDepth;
+            OnPropertyChanged();
+        }
+    }
+
     public void StartNewGame()
     {
+        CancelInFlightAiTurn();
         _gameSessionService.StartNewGame();
         ClearSelection();
         SetFocusedSquare(DefaultKeyboardFocusSquare);
         FeedbackText = string.Empty;
         LastActionText = "Last action: Started a new game.";
         RefreshBoardFromCurrentState();
+        QueueAiTurnIfNeeded();
     }
 
     public async Task SaveGameAsync(CancellationToken cancellationToken = default)
@@ -213,12 +319,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         try
         {
+            CancelInFlightAiTurn();
             await _gameSessionService.LoadAsync(filePath, cancellationToken);
             ClearSelection();
             SetFocusedSquare(DefaultKeyboardFocusSquare);
             LastActionText = $"Last action: Loaded game from {filePath}.";
             FeedbackText = string.Empty;
             RefreshBoardFromCurrentState();
+            QueueAiTurnIfNeeded();
         }
         catch (Exception exception) when (
             exception is InvalidDataException
@@ -252,6 +360,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 return true;
             case Key.Enter:
             case Key.Space:
+                if (IsHumanInputBlockedByAiTurn())
+                {
+                    FeedbackText = BuildAiThinkingFeedback();
+                    QueueAiTurnIfNeeded();
+                    return true;
+                }
+
                 OnSquareClicked(_focusedSquare);
                 return true;
             case Key.Escape:
@@ -271,6 +386,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         if (currentState.Status != GameStatus.InProgress)
         {
             FeedbackText = $"Game is finished ({currentState.Status}). Start a new game to continue.";
+            return;
+        }
+
+        if (IsHumanInputBlockedByAiTurn())
+        {
+            FeedbackText = BuildAiThinkingFeedback();
+            QueueAiTurnIfNeeded();
             return;
         }
 
@@ -339,6 +461,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         ClearSelection();
         RefreshBoardFromCurrentState();
+        QueueAiTurnIfNeeded();
     }
 
     private bool SelectSquare(Square square)
@@ -388,6 +511,162 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             squareViewModel.SetLegalDestination(isLegalDestination);
             squareViewModel.SetKeyboardFocused(isKeyboardFocused);
         }
+    }
+
+    private bool IsHumanInputBlockedByAiTurn()
+    {
+        if (!IsPlayVsAiEnabled)
+        {
+            return false;
+        }
+
+        if (_isAiTurnInProgress)
+        {
+            return true;
+        }
+
+        var currentState = _gameSessionService.CurrentGameState;
+        return currentState.Status == GameStatus.InProgress && currentState.SideToMove == AiControlledColor;
+    }
+
+    private string BuildAiThinkingFeedback()
+    {
+        return $"AI ({AiControlledColor}) is thinking...";
+    }
+
+    private void QueueAiTurnIfNeeded()
+    {
+        if (!IsPlayVsAiEnabled || _isAiTurnInProgress)
+        {
+            return;
+        }
+
+        if (!_aiTurnService.CanRequestMove(AiControlledColor))
+        {
+            return;
+        }
+
+        var aiTurnCancellationSource = TryBeginAiTurn();
+        if (aiTurnCancellationSource is null)
+        {
+            return;
+        }
+
+        _ = PlayAiTurnAsync(aiTurnCancellationSource);
+    }
+
+    private async Task PlayAiTurnAsync(CancellationTokenSource aiTurnCancellationSource)
+    {
+        if (_isAiTurnInProgress)
+        {
+            CompleteAiTurn(aiTurnCancellationSource);
+            return;
+        }
+
+        _isAiTurnInProgress = true;
+        OnPropertyChanged(nameof(IsAiThinking));
+        FeedbackText = BuildAiThinkingFeedback();
+        var shouldRequeueAiTurn = false;
+
+        try
+        {
+            var aiMove = await _aiTurnService.TryPlayTurnAsync(
+                AiControlledColor,
+                AiSearchDepth,
+                aiTurnCancellationSource.Token);
+            if (aiMove is not null)
+            {
+                LastActionText = $"Last action: AI ({AiControlledColor}) moved {aiMove.MovedPiece.Type} from {ToCoordinate(aiMove.From)} to {ToCoordinate(aiMove.To)}.";
+            }
+            else if (IsPlayVsAiEnabled && _aiTurnService.CanRequestMove(AiControlledColor))
+            {
+                shouldRequeueAiTurn = true;
+            }
+
+            ClearSelection();
+            RefreshBoardFromCurrentState();
+            FeedbackText = string.Empty;
+        }
+        catch (OperationCanceledException)
+        {
+            FeedbackText = IsPlayVsAiEnabled ? "AI move canceled." : string.Empty;
+            shouldRequeueAiTurn = IsPlayVsAiEnabled && _aiTurnService.CanRequestMove(AiControlledColor);
+        }
+        catch (Exception exception)
+        {
+            FeedbackText = $"AI move failed: {exception.Message}";
+        }
+        finally
+        {
+            _isAiTurnInProgress = false;
+            OnPropertyChanged(nameof(IsAiThinking));
+            CompleteAiTurn(aiTurnCancellationSource);
+            if (shouldRequeueAiTurn)
+            {
+                QueueAiTurnIfNeeded();
+            }
+        }
+    }
+
+    private CancellationTokenSource? TryBeginAiTurn()
+    {
+        lock (_aiTurnSyncRoot)
+        {
+            if (_aiTurnCancellationSource is not null)
+            {
+                return null;
+            }
+
+            _aiTurnCancellationSource = new CancellationTokenSource();
+            return _aiTurnCancellationSource;
+        }
+    }
+
+    private void CancelInFlightAiTurn()
+    {
+        CancellationTokenSource? cancellationSource;
+        lock (_aiTurnSyncRoot)
+        {
+            cancellationSource = _aiTurnCancellationSource;
+            _aiTurnCancellationSource = null;
+        }
+
+        if (cancellationSource is null)
+        {
+            return;
+        }
+
+        try
+        {
+            cancellationSource.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        finally
+        {
+            cancellationSource.Dispose();
+        }
+    }
+
+    private void CompleteAiTurn(CancellationTokenSource cancellationSource)
+    {
+        var shouldDispose = false;
+        lock (_aiTurnSyncRoot)
+        {
+            if (ReferenceEquals(_aiTurnCancellationSource, cancellationSource))
+            {
+                _aiTurnCancellationSource = null;
+                shouldDispose = true;
+            }
+        }
+
+        if (!shouldDispose)
+        {
+            return;
+        }
+
+        cancellationSource.Dispose();
     }
 
     private void MoveFocusedSquare(int fileDelta, int rankDelta)
@@ -567,5 +846,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
+
+    private sealed class NoOpAiTurnService : IAiTurnService
+    {
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return false;
+        }
+
+        public Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<Move?>(null);
+        }
     }
 }
