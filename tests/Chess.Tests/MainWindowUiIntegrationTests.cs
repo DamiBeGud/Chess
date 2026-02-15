@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -111,6 +112,81 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal(string.Empty, GetFeedbackText(window));
             AssertSquareHasNoPieceAsset(e2);
             AssertSquareHasPieceAsset(e4, "white-pawn");
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void SidePanel_RendersStatusLastActionAndMoveHistory()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+
+            var sidePanel = window.FindControl<Border>("SidePanelBorder");
+            var emptyHistoryText = window.FindControl<TextBlock>("MoveHistoryEmptyTextBlock");
+
+            Assert.NotNull(sidePanel);
+            Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
+            Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
+            Assert.Empty(GetMoveHistoryEntries(window));
+            Assert.NotNull(emptyHistoryText);
+            Assert.True(emptyHistoryText!.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MoveHistory_UpdatesAfterLegalMovesWithNumbering()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            Click(FindSquareButton(window, "e2"));
+            Click(FindSquareButton(window, "e4"));
+            Click(FindSquareButton(window, "e7"));
+            Click(FindSquareButton(window, "e5"));
+            window.UpdateLayout();
+
+            Assert.Equal(
+                new[] { "1. e2-e4", "1... e7-e5" },
+                GetMoveHistoryEntries(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public void MoveHistoryScrollViewer_BecomesScrollableForLongHistory()
+    {
+        var longHistoryState = CreateStateWithMoveHistory(moveCount: 120);
+        var window = CreateWindow(new StubGameSessionService(longHistoryState));
+
+        try
+        {
+            window.Show();
+            window.UpdateLayout();
+
+            var scrollViewer = window.FindControl<ScrollViewer>("MoveHistoryScrollViewer");
+            Assert.NotNull(scrollViewer);
+
+            var moveHistoryEntries = GetMoveHistoryEntries(window);
+            Assert.Equal(120, moveHistoryEntries.Count);
+            Assert.True(scrollViewer!.Extent.Height > scrollViewer.Viewport.Height);
         }
         finally
         {
@@ -470,6 +546,39 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public void SidePanelLayout_StacksBelowBoardOnNarrowWindows()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            ResizeWindow(window, 1200d, 820d);
+            var boardContainerBorder = FindBoardContainerBorder(window);
+            var sidePanelBorder = FindSidePanelBorder(window);
+
+            Assert.Equal(0, Grid.GetRow(sidePanelBorder));
+            Assert.Equal(1, Grid.GetColumn(sidePanelBorder));
+            var boardBoundsWide = GetBoundsRelativeToWindow(boardContainerBorder, window);
+            var sidePanelBoundsWide = GetBoundsRelativeToWindow(sidePanelBorder, window);
+            Assert.True(sidePanelBoundsWide.Left >= boardBoundsWide.Right - LayoutTolerance);
+            Assert.InRange(Math.Abs(sidePanelBoundsWide.Top - boardBoundsWide.Top), 0d, LayoutTolerance);
+
+            ResizeWindow(window, 760d, 940d);
+            Assert.Equal(0, Grid.GetRow(boardContainerBorder));
+            Assert.Equal(0, Grid.GetColumn(boardContainerBorder));
+            Assert.Equal(1, Grid.GetRow(sidePanelBorder));
+            Assert.Equal(0, Grid.GetColumn(sidePanelBorder));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void PieceAssets_RenderOnLightAndDarkSquares()
     {
         var window = CreateWindow(CreateSessionService());
@@ -558,6 +667,16 @@ public sealed class MainWindowUiIntegrationTests
         return window.GetVisualDescendants()
             .OfType<Button>()
             .Single(button => string.Equals(button.Content?.ToString(), "Start New Game", StringComparison.Ordinal));
+    }
+
+    private static Border FindBoardContainerBorder(Window window)
+    {
+        return Assert.IsType<Border>(window.FindControl<Border>("BoardContainerBorder"));
+    }
+
+    private static Border FindSidePanelBorder(Window window)
+    {
+        return Assert.IsType<Border>(window.FindControl<Border>("SidePanelBorder"));
     }
 
     private static BoardSquareViewModel GetSquareViewModel(Button squareButton)
@@ -755,6 +874,54 @@ public sealed class MainWindowUiIntegrationTests
     private static string ToCoordinate(int file, int rank)
     {
         return $"{(char)('a' + file)}{rank}";
+    }
+
+    private static IReadOnlyList<string> GetMoveHistoryEntries(Window window)
+    {
+        var itemsControl = window.FindControl<ItemsControl>("MoveHistoryItemsControl");
+        Assert.NotNull(itemsControl);
+
+        var items = Assert.IsAssignableFrom<IEnumerable>(itemsControl!.ItemsSource ?? Array.Empty<string>());
+        return items
+            .Cast<object?>()
+            .Select(item => item?.ToString())
+            .Where(text => !string.IsNullOrWhiteSpace(text))
+            .Cast<string>()
+            .ToArray();
+    }
+
+    private static GameState CreateStateWithMoveHistory(int moveCount)
+    {
+        var moveHistory = new List<Move>(moveCount);
+
+        for (var index = 0; index < moveCount; index++)
+        {
+            var isWhiteMove = index % 2 == 0;
+            var color = isWhiteMove ? PieceColor.White : PieceColor.Black;
+            var fromRank = isWhiteMove ? 1 : 6;
+            var toRank = isWhiteMove ? 2 : 5;
+            var file = index % 8;
+
+            moveHistory.Add(
+                new Move(
+                    From: new Square(file, fromRank),
+                    To: new Square(file, toRank),
+                    MovedPiece: new Piece(PieceType.Pawn, color, HasMoved: true)));
+        }
+
+        return new GameState(
+            Pieces:
+            [
+                new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+                new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black))
+            ],
+            SideToMove: moveCount % 2 == 0 ? PieceColor.White : PieceColor.Black,
+            CastlingRights: CastlingRights.None,
+            EnPassantTarget: null,
+            HalfmoveClock: 0,
+            FullmoveNumber: 1,
+            Status: GameStatus.InProgress,
+            MoveHistory: moveHistory);
     }
 
     private static string GetGameStatusText(Window window)

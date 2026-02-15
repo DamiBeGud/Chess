@@ -29,6 +29,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _lastActionText = string.Empty;
     private string _feedbackText = string.Empty;
     private string _focusedSquareText = string.Empty;
+    private IReadOnlyList<string> _moveHistoryEntries = Array.Empty<string>();
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
         : this(gameSessionService, new PieceAssetResolver())
@@ -120,6 +121,24 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     }
 
     public string KeyboardHintText => "Keyboard: Arrow keys move focus, Enter/Space select or move, Esc clears selection.";
+
+    public IReadOnlyList<string> MoveHistoryEntries
+    {
+        get => _moveHistoryEntries;
+        private set
+        {
+            if (ReferenceEquals(_moveHistoryEntries, value))
+            {
+                return;
+            }
+
+            _moveHistoryEntries = value;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(IsMoveHistoryEmpty));
+        }
+    }
+
+    public bool IsMoveHistoryEmpty => MoveHistoryEntries.Count == 0;
 
     public ICommand NewGameCommand { get; }
 
@@ -276,6 +295,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         GameStatusText = BuildGameStatusText(currentState);
+        MoveHistoryEntries = BuildMoveHistoryEntries(currentState.MoveHistory);
     }
 
     private void UpdateSquareHighlights()
@@ -383,6 +403,62 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             GameStatus.BlackWin => "Status: Black wins.",
             GameStatus.Draw => "Status: Draw.",
             _ => $"Status: {gameState.Status}."
+        };
+    }
+
+    private static IReadOnlyList<string> BuildMoveHistoryEntries(IReadOnlyList<Move> moveHistory)
+    {
+        if (moveHistory.Count == 0)
+        {
+            return Array.Empty<string>();
+        }
+
+        var entries = new List<string>(moveHistory.Count);
+
+        for (var index = 0; index < moveHistory.Count; index++)
+        {
+            var moveNumber = (index / 2) + 1;
+            var movePrefix = index % 2 == 0 ? $"{moveNumber}. " : $"{moveNumber}... ";
+            entries.Add($"{movePrefix}{BuildMoveNotation(moveHistory[index])}");
+        }
+
+        return entries;
+    }
+
+    private static string BuildMoveNotation(Move move)
+    {
+        if (move.IsCastling)
+        {
+            return move.To.File > move.From.File ? "O-O" : "O-O-O";
+        }
+
+        var separator = move.CapturedPiece is not null || move.IsEnPassant ? "x" : "-";
+        var notation = $"{ToCoordinate(move.From)}{separator}{ToCoordinate(move.To)}";
+
+        if (move.PromotionPieceType is not null)
+        {
+            notation = $"{notation}={ToPromotionSymbol(move.PromotionPieceType.Value)}";
+        }
+
+        if (move.IsEnPassant)
+        {
+            notation = $"{notation} e.p.";
+        }
+
+        return notation;
+    }
+
+    private static string ToPromotionSymbol(PieceType pieceType)
+    {
+        return pieceType switch
+        {
+            PieceType.Queen => "Q",
+            PieceType.Rook => "R",
+            PieceType.Bishop => "B",
+            PieceType.Knight => "N",
+            PieceType.King => "K",
+            PieceType.Pawn => "P",
+            _ => pieceType.ToString()
         };
     }
 

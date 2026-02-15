@@ -24,6 +24,8 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal(64, viewModel.BoardSquares.Count);
         Assert.Equal("Status: In progress. Side to move: White.", viewModel.GameStatusText);
+        Assert.Empty(viewModel.MoveHistoryEntries);
+        Assert.True(viewModel.IsMoveHistoryEmpty);
 
         var e2 = FindSquare(viewModel, 4, 1);
         var e7 = FindSquare(viewModel, 4, 6);
@@ -110,6 +112,70 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Last action: White moved Pawn from e2 to e4.", viewModel.LastActionText);
         AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
         AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
+        Assert.Equal(new[] { "1. e2-e4" }, viewModel.MoveHistoryEntries);
+        Assert.False(viewModel.IsMoveHistoryEmpty);
+    }
+
+    [Fact]
+    public void ConsecutiveLegalMoves_UpdateMoveHistoryWithMoveNumbers()
+    {
+        var viewModel = CreateViewModel();
+        var e2 = FindSquare(viewModel, 4, 1);
+        var e4 = FindSquare(viewModel, 4, 3);
+        var e7 = FindSquare(viewModel, 4, 6);
+        var e5 = FindSquare(viewModel, 4, 4);
+
+        e2.ClickCommand.Execute(null);
+        e4.ClickCommand.Execute(null);
+        e7.ClickCommand.Execute(null);
+        e5.ClickCommand.Execute(null);
+
+        Assert.Equal(
+            new[] { "1. e2-e4", "1... e7-e5" },
+            viewModel.MoveHistoryEntries);
+        Assert.False(viewModel.IsMoveHistoryEmpty);
+    }
+
+    [Fact]
+    public void Constructor_WithPreloadedMoveHistory_FormatsSpecialNotation()
+    {
+        var preloadedState = CreateState(
+            GameStatus.InProgress,
+            PieceColor.White,
+            new List<Move>
+            {
+                new(
+                    From: new Square(4, 0),
+                    To: new Square(6, 0),
+                    MovedPiece: new Piece(PieceType.King, PieceColor.White, HasMoved: true),
+                    IsCastling: true),
+                new(
+                    From: new Square(4, 7),
+                    To: new Square(2, 7),
+                    MovedPiece: new Piece(PieceType.King, PieceColor.Black, HasMoved: true),
+                    IsCastling: true),
+                new(
+                    From: new Square(4, 3),
+                    To: new Square(3, 4),
+                    MovedPiece: new Piece(PieceType.Pawn, PieceColor.White, HasMoved: true),
+                    CapturedPiece: new Piece(PieceType.Pawn, PieceColor.Black, HasMoved: true)),
+                new(
+                    From: new Square(1, 1),
+                    To: new Square(0, 0),
+                    MovedPiece: new Piece(PieceType.Pawn, PieceColor.Black, HasMoved: true),
+                    CapturedPiece: new Piece(PieceType.Rook, PieceColor.White, HasMoved: true),
+                    PromotionPieceType: PieceType.Queen)
+            },
+            new PiecePlacement(new Square(6, 0), new Piece(PieceType.King, PieceColor.White, HasMoved: true)),
+            new PiecePlacement(new Square(2, 7), new Piece(PieceType.King, PieceColor.Black, HasMoved: true)));
+
+        var session = new StubGameSessionService(preloadedState);
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver());
+
+        Assert.Equal(
+            new[] { "1. O-O", "1... O-O-O", "2. e4xd5", "2... b2xa1=Q" },
+            viewModel.MoveHistoryEntries);
+        Assert.False(viewModel.IsMoveHistoryEmpty);
     }
 
     [Fact]
@@ -259,6 +325,24 @@ public sealed class MainWindowViewModelTests
             FullmoveNumber: 1,
             Status: status,
             MoveHistory: [],
+            PositionHistory: []);
+    }
+
+    private static GameState CreateState(
+        GameStatus status,
+        PieceColor sideToMove,
+        IReadOnlyList<Move> moveHistory,
+        params PiecePlacement[] pieces)
+    {
+        return new GameState(
+            Pieces: pieces,
+            SideToMove: sideToMove,
+            CastlingRights: CastlingRights.None,
+            EnPassantTarget: null,
+            HalfmoveClock: 0,
+            FullmoveNumber: 1,
+            Status: status,
+            MoveHistory: moveHistory,
             PositionHistory: []);
     }
 
