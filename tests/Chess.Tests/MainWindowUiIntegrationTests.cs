@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -141,6 +142,53 @@ public sealed class MainWindowUiIntegrationTests
         finally
         {
             window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task SaveLoadControls_FromGui_RestoreRoundTripState()
+    {
+        var window = CreateWindow(CreateSessionService());
+        var savePath = Path.Combine(Path.GetTempPath(), $"chess-ui-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            var viewModel = Assert.IsType<MainWindowViewModel>(window.DataContext);
+            viewModel.PersistenceFilePath = savePath;
+
+            Click(FindSquareButton(window, "e2"));
+            Click(FindSquareButton(window, "e4"));
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+
+            Click(FindSaveGameButton(window));
+            await WaitForConditionAsync(() => GetLastActionText(window) == $"Last action: Saved game to {savePath}.");
+            Assert.True(File.Exists(savePath));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+
+            Click(FindStartNewGameButton(window));
+            Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
+
+            Click(FindLoadGameButton(window));
+            await WaitForConditionAsync(() => GetLastActionText(window) == $"Last action: Loaded game from {savePath}.");
+
+            var e2 = FindSquareButton(window, "e2");
+            var e4 = FindSquareButton(window, "e4");
+            AssertSquareHasNoPieceAsset(e2);
+            AssertSquareHasPieceAsset(e4, "white-pawn");
+            Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+        }
+        finally
+        {
+            window.Close();
+
+            if (File.Exists(savePath))
+            {
+                File.Delete(savePath);
+            }
         }
     }
 
@@ -669,6 +717,16 @@ public sealed class MainWindowUiIntegrationTests
             .Single(button => string.Equals(button.Content?.ToString(), "Start New Game", StringComparison.Ordinal));
     }
 
+    private static Button FindSaveGameButton(Window window)
+    {
+        return Assert.IsType<Button>(window.FindControl<Button>("SaveGameButton"));
+    }
+
+    private static Button FindLoadGameButton(Window window)
+    {
+        return Assert.IsType<Button>(window.FindControl<Button>("LoadGameButton"));
+    }
+
     private static Border FindBoardContainerBorder(Window window)
     {
         return Assert.IsType<Border>(window.FindControl<Border>("BoardContainerBorder"));
@@ -756,6 +814,21 @@ public sealed class MainWindowUiIntegrationTests
         window.Width = width;
         window.Height = height;
         window.UpdateLayout();
+    }
+
+    private static async Task WaitForConditionAsync(Func<bool> condition, int timeoutMilliseconds = 3000)
+    {
+        var startedAt = DateTime.UtcNow;
+
+        while (!condition())
+        {
+            if ((DateTime.UtcNow - startedAt).TotalMilliseconds > timeoutMilliseconds)
+            {
+                throw new TimeoutException("Timed out waiting for expected UI condition.");
+            }
+
+            await Task.Delay(20);
+        }
     }
 
     private static Rect GetBoundsRelativeToWindow(Control control, Window window)

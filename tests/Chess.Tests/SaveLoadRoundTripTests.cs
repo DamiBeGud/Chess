@@ -1,8 +1,10 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
 using Chess.Persistence;
@@ -131,6 +133,58 @@ public sealed class SaveLoadRoundTripTests
     }
 
     [Fact]
+    public async Task Load_WithCorruptedJson_ThrowsInvalidDataException()
+    {
+        var store = new JsonGameStateStore();
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(filePath, "{ this is not valid json");
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(filePath));
+            Assert.Contains("invalid or corrupted", exception.Message, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task Load_WithDuplicateSquareEntries_ThrowsInvalidDataException()
+    {
+        var engine = new ChessGameEngine();
+        var store = new JsonGameStateStore();
+        var invalidState = engine.CreateInitialGameState() with
+        {
+            Pieces = new List<PiecePlacement>
+            {
+                new(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+                new(new Square(4, 0), new Piece(PieceType.Rook, PieceColor.White)),
+                new(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black))
+            }
+        };
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            await File.WriteAllTextAsync(filePath, JsonSerializer.Serialize(invalidState));
+            var exception = await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync(filePath));
+            Assert.Contains("Multiple pieces", exception.Message, StringComparison.Ordinal);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
     public async Task SaveAndLoad_AfterSpecialMoveSequence_PreservesEquivalentContinuation()
     {
         var engine = new ChessGameEngine();
@@ -237,6 +291,44 @@ public sealed class SaveLoadRoundTripTests
             Assert.True(engine.TryApplyMove(loaded, new Square(6, 7), new Square(7, 7), out loaded));
 
             Assert.Equal(GameStatus.Draw, loaded.Status);
+        }
+        finally
+        {
+            if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task SaveAndLoad_ApplicationFlow_AllowsContinueAndFinishAfterLoad()
+    {
+        var engine = new ChessGameEngine();
+        var store = new JsonGameStateStore();
+        var session = new GameSessionService(engine, store);
+        var filePath = Path.Combine(Path.GetTempPath(), $"chess-save-{Path.GetRandomFileName()}.json");
+
+        try
+        {
+            session.StartNewGame();
+            Assert.True(session.TryMakeMove(new Square(5, 1), new Square(5, 2)));
+            Assert.True(session.TryMakeMove(new Square(4, 6), new Square(4, 4)));
+
+            await session.SaveAsync(filePath);
+
+            session.StartNewGame();
+            Assert.Equal(PieceColor.White, session.CurrentGameState.SideToMove);
+
+            var loaded = await session.LoadAsync(filePath);
+            Assert.Equal(PieceColor.White, loaded.SideToMove);
+            Assert.Equal(GameStatus.InProgress, loaded.Status);
+
+            Assert.True(session.TryMakeMove(new Square(6, 1), new Square(6, 3)));
+            Assert.True(session.TryMakeMove(new Square(3, 7), new Square(7, 3)));
+
+            Assert.Equal(GameStatus.BlackWin, session.CurrentGameState.Status);
+            Assert.Equal(PieceColor.White, session.CurrentGameState.SideToMove);
         }
         finally
         {

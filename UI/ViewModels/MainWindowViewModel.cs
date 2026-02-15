@@ -2,8 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.IO;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Input;
 using Chess.AppCore;
@@ -30,6 +33,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _feedbackText = string.Empty;
     private string _focusedSquareText = string.Empty;
     private IReadOnlyList<string> _moveHistoryEntries = Array.Empty<string>();
+    private string _persistenceFilePath = BuildDefaultPersistenceFilePath();
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
         : this(gameSessionService, new PieceAssetResolver())
@@ -47,6 +51,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _boardSquares = new ReadOnlyCollection<BoardSquareViewModel>(squares);
 
         NewGameCommand = new RelayCommand(StartNewGame);
+        SaveGameCommand = new RelayCommand(async () => await SaveGameAsync());
+        LoadGameCommand = new RelayCommand(async () => await LoadGameAsync());
         StartNewGame();
     }
 
@@ -142,6 +148,25 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public ICommand NewGameCommand { get; }
 
+    public ICommand SaveGameCommand { get; }
+
+    public ICommand LoadGameCommand { get; }
+
+    public string PersistenceFilePath
+    {
+        get => _persistenceFilePath;
+        set
+        {
+            if (_persistenceFilePath == value)
+            {
+                return;
+            }
+
+            _persistenceFilePath = value;
+            OnPropertyChanged();
+        }
+    }
+
     public void StartNewGame()
     {
         _gameSessionService.StartNewGame();
@@ -150,6 +175,59 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         FeedbackText = string.Empty;
         LastActionText = "Last action: Started a new game.";
         RefreshBoardFromCurrentState();
+    }
+
+    public async Task SaveGameAsync(CancellationToken cancellationToken = default)
+    {
+        var filePath = PersistenceFilePath?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            FeedbackText = "Save file path is required.";
+            return;
+        }
+
+        try
+        {
+            await _gameSessionService.SaveAsync(filePath, cancellationToken);
+            LastActionText = $"Last action: Saved game to {filePath}.";
+            FeedbackText = string.Empty;
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException
+            or UnauthorizedAccessException
+            or IOException
+            or ArgumentException)
+        {
+            FeedbackText = $"Unable to save game: {exception.Message}";
+        }
+    }
+
+    public async Task LoadGameAsync(CancellationToken cancellationToken = default)
+    {
+        var filePath = PersistenceFilePath?.Trim() ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(filePath))
+        {
+            FeedbackText = "Save file path is required.";
+            return;
+        }
+
+        try
+        {
+            await _gameSessionService.LoadAsync(filePath, cancellationToken);
+            ClearSelection();
+            SetFocusedSquare(DefaultKeyboardFocusSquare);
+            LastActionText = $"Last action: Loaded game from {filePath}.";
+            FeedbackText = string.Empty;
+            RefreshBoardFromCurrentState();
+        }
+        catch (Exception exception) when (
+            exception is InvalidDataException
+            or UnauthorizedAccessException
+            or IOException
+            or ArgumentException)
+        {
+            FeedbackText = $"Unable to load game: {exception.Message}";
+        }
     }
 
     public bool HandleKeyboardInput(Key key)
@@ -474,6 +552,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return Enumerable.Range(0, 8)
             .Select(offset => (8 - offset).ToString())
             .ToArray();
+    }
+
+    private static string BuildDefaultPersistenceFilePath()
+    {
+        var localAppDataDirectory = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        var baseDirectory = string.IsNullOrWhiteSpace(localAppDataDirectory)
+            ? Environment.CurrentDirectory
+            : localAppDataDirectory;
+
+        return Path.Combine(baseDirectory, "Chess", "saved-game.json");
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

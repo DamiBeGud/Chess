@@ -178,7 +178,7 @@
                     BorderThickness="1"
                     CornerRadius="6"
                     Padding="12">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,*"
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*"
                       RowSpacing="10">
                     <TextBlock Grid.Row="0"
                                Text="Game Panel"
@@ -215,12 +215,34 @@
                                    FontSize="12" />
                     </StackPanel>
 
-                    <TextBlock Grid.Row="3"
+                    <StackPanel Grid.Row="3"
+                                Spacing="6">
+                        <TextBlock Text="Save File"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                        <TextBox x:Name="SaveFilePathTextBox"
+                                 Text="{Binding PersistenceFilePath}"
+                                 Watermark="Path to save file"
+                                 MinWidth="220" />
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="8">
+                            <Button x:Name="SaveGameButton"
+                                    Grid.Column="0"
+                                    Content="Save Game"
+                                    Command="{Binding SaveGameCommand}" />
+                            <Button x:Name="LoadGameButton"
+                                    Grid.Column="1"
+                                    Content="Load Game"
+                                    Command="{Binding LoadGameCommand}" />
+                        </Grid>
+                    </StackPanel>
+
+                    <TextBlock Grid.Row="4"
                                Text="Move History"
                                FontSize="16"
                                FontWeight="SemiBold" />
 
-                    <Border Grid.Row="4"
+                    <Border Grid.Row="5"
                             BorderBrush="#D5C7B7"
                             BorderThickness="1"
                             CornerRadius="4"

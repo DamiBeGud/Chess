@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -296,6 +297,66 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal(e3BeforeSelection, e3.Background);
         Assert.Equal("Selection cleared.", viewModel.FeedbackText);
+    }
+
+    [Fact]
+    public async Task SaveAndLoadCommands_RoundTripStateAndUpdateFeedback()
+    {
+        var viewModel = CreateViewModel();
+        var savePath = Path.Combine(Path.GetTempPath(), $"chess-viewmodel-save-{Path.GetRandomFileName()}.json");
+        viewModel.PersistenceFilePath = savePath;
+
+        try
+        {
+            FindSquare(viewModel, 4, 1).ClickCommand.Execute(null);
+            FindSquare(viewModel, 4, 3).ClickCommand.Execute(null);
+
+            await viewModel.SaveGameAsync();
+            Assert.True(File.Exists(savePath));
+            Assert.Equal($"Last action: Saved game to {savePath}.", viewModel.LastActionText);
+            Assert.Equal(string.Empty, viewModel.FeedbackText);
+
+            viewModel.StartNewGame();
+            Assert.Equal("Status: In progress. Side to move: White.", viewModel.GameStatusText);
+
+            await viewModel.LoadGameAsync();
+            Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
+            Assert.Equal($"Last action: Loaded game from {savePath}.", viewModel.LastActionText);
+            Assert.Equal(string.Empty, viewModel.FeedbackText);
+            AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
+            AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
+        }
+        finally
+        {
+            if (File.Exists(savePath))
+            {
+                File.Delete(savePath);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task LoadGameAsync_WithCorruptedFile_ShowsGracefulFeedback()
+    {
+        var viewModel = CreateViewModel();
+        var savePath = Path.Combine(Path.GetTempPath(), $"chess-viewmodel-save-{Path.GetRandomFileName()}.json");
+        viewModel.PersistenceFilePath = savePath;
+
+        try
+        {
+            await File.WriteAllTextAsync(savePath, "{ invalid json");
+            await viewModel.LoadGameAsync();
+
+            Assert.StartsWith("Unable to load game: ", viewModel.FeedbackText, StringComparison.Ordinal);
+            Assert.Equal("Status: In progress. Side to move: White.", viewModel.GameStatusText);
+        }
+        finally
+        {
+            if (File.Exists(savePath))
+            {
+                File.Delete(savePath);
+            }
+        }
     }
 
     private static MainWindowViewModel CreateViewModel()
