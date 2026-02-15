@@ -1,12 +1,15 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input;
+using Avalonia.Media;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
 using Chess.Persistence;
+using Chess.UI.Assets;
 using Chess.UI.ViewModels;
 using Xunit;
 
@@ -24,8 +27,8 @@ public sealed class MainWindowViewModelTests
 
         var e2 = FindSquare(viewModel, 4, 1);
         var e7 = FindSquare(viewModel, 4, 6);
-        Assert.Equal("\u2659", e2.PieceGlyph);
-        Assert.Equal("\u265F", e7.PieceGlyph);
+        AssertSquareHasPieceAsset(e2, "white-pawn");
+        AssertSquareHasPieceAsset(e7, "black-pawn");
     }
 
     [Fact]
@@ -105,8 +108,8 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
         Assert.Equal(string.Empty, viewModel.FeedbackText);
         Assert.Equal("Last action: White moved Pawn from e2 to e4.", viewModel.LastActionText);
-        Assert.Equal(string.Empty, FindSquare(viewModel, 4, 1).PieceGlyph);
-        Assert.Equal("\u2659", FindSquare(viewModel, 4, 3).PieceGlyph);
+        AssertSquareHasNoPieceAsset(FindSquare(viewModel, 4, 1));
+        AssertSquareHasPieceAsset(FindSquare(viewModel, 4, 3), "white-pawn");
     }
 
     [Fact]
@@ -119,7 +122,7 @@ public sealed class MainWindowViewModelTests
             new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)));
 
         var session = new StubGameSessionService(finishedState);
-        var viewModel = new MainWindowViewModel(session);
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver());
 
         Assert.Equal("Status: White wins.", viewModel.GameStatusText);
     }
@@ -134,7 +137,7 @@ public sealed class MainWindowViewModelTests
             new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)));
 
         var session = new StubGameSessionService(finishedState);
-        var viewModel = new MainWindowViewModel(session);
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver());
 
         var e1 = FindSquare(viewModel, 4, 0);
         e1.ClickCommand.Execute(null);
@@ -178,8 +181,8 @@ public sealed class MainWindowViewModelTests
         Assert.Equal("Status: In progress. Side to move: Black.", viewModel.GameStatusText);
         Assert.Equal(string.Empty, viewModel.FeedbackText);
         Assert.Equal("Last action: White moved Pawn from f2 to f3.", viewModel.LastActionText);
-        Assert.Equal(string.Empty, FindSquare(viewModel, 5, 1).PieceGlyph);
-        Assert.Equal("\u2659", FindSquare(viewModel, 5, 2).PieceGlyph);
+        AssertSquareHasNoPieceAsset(FindSquare(viewModel, 5, 1));
+        AssertSquareHasPieceAsset(FindSquare(viewModel, 5, 2), "white-pawn");
     }
 
     [Fact]
@@ -232,7 +235,17 @@ public sealed class MainWindowViewModelTests
     private static MainWindowViewModel CreateViewModel()
     {
         var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
-        return new MainWindowViewModel(session);
+        return new MainWindowViewModel(session, CreateTestAssetResolver());
+    }
+
+    private static IPieceAssetResolver CreateTestAssetResolver()
+    {
+        return new PieceAssetResolver(_ => CreateTestImage());
+    }
+
+    private static IImage CreateTestImage()
+    {
+        return new TestImage();
     }
 
     private static GameState CreateState(GameStatus status, PieceColor sideToMove, params PiecePlacement[] pieces)
@@ -252,6 +265,19 @@ public sealed class MainWindowViewModelTests
     private static BoardSquareViewModel FindSquare(MainWindowViewModel viewModel, int file, int rank)
     {
         return viewModel.BoardSquares.Single(square => square.Square == new Square(file, rank));
+    }
+
+    private static void AssertSquareHasNoPieceAsset(BoardSquareViewModel squareViewModel)
+    {
+        Assert.Null(squareViewModel.PieceImage);
+        Assert.Equal(string.Empty, squareViewModel.PieceAssetUri);
+        Assert.False(squareViewModel.IsUsingFallbackAsset);
+    }
+
+    private static void AssertSquareHasPieceAsset(BoardSquareViewModel squareViewModel, string expectedAssetStem)
+    {
+        Assert.NotNull(squareViewModel.PieceImage);
+        Assert.Contains($"/{expectedAssetStem}.", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
     }
 
     private sealed class StubGameSessionService : IGameSessionService

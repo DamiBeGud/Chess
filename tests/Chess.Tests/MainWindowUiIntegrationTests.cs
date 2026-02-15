@@ -109,8 +109,8 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             Assert.Equal("Last action: White moved Pawn from e2 to e4.", GetLastActionText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
-            Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
-            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasNoPieceAsset(e2);
+            AssertSquareHasPieceAsset(e4, "white-pawn");
         }
         finally
         {
@@ -224,8 +224,8 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             Assert.Equal("Last action: White moved Pawn from e2 to e4.", GetLastActionText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
-            Assert.Equal(string.Empty, GetSquareViewModel(sourceButton).PieceGlyph);
-            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasNoPieceAsset(sourceButton);
+            AssertSquareHasPieceAsset(e4, "white-pawn");
         }
         finally
         {
@@ -256,8 +256,8 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
             Assert.Equal("Last action: White moved Pawn from f2 to f3.", GetLastActionText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
-            Assert.Equal(string.Empty, GetSquareViewModel(sourceButton).PieceGlyph);
-            Assert.Equal("\u2659", GetSquareViewModel(f3).PieceGlyph);
+            AssertSquareHasNoPieceAsset(sourceButton);
+            AssertSquareHasPieceAsset(f3, "white-pawn");
         }
         finally
         {
@@ -282,8 +282,8 @@ public sealed class MainWindowUiIntegrationTests
             Click(e2);
             Click(e4);
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
-            Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
-            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasNoPieceAsset(e2);
+            AssertSquareHasPieceAsset(e4, "white-pawn");
 
             startNewGameButton.Focus();
             PressKeyOnHeadlessWindow(window, Key.Enter, PhysicalKey.Enter);
@@ -292,8 +292,8 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
             Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
-            Assert.Equal("\u2659", GetSquareViewModel(e2).PieceGlyph);
-            Assert.Equal(string.Empty, GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasPieceAsset(e2, "white-pawn");
+            AssertSquareHasNoPieceAsset(e4);
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
         }
         finally
@@ -319,8 +319,8 @@ public sealed class MainWindowUiIntegrationTests
             Click(e2);
             Click(e4);
             Assert.Equal("Status: In progress. Side to move: Black.", GetGameStatusText(window));
-            Assert.Equal(string.Empty, GetSquareViewModel(e2).PieceGlyph);
-            Assert.Equal("\u2659", GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasNoPieceAsset(e2);
+            AssertSquareHasPieceAsset(e4, "white-pawn");
 
             startNewGameButton.Focus();
             PressKeyOnHeadlessWindow(window, Key.Space, PhysicalKey.Space);
@@ -329,8 +329,8 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Equal("Status: In progress. Side to move: White.", GetGameStatusText(window));
             Assert.Equal("Last action: Started a new game.", GetLastActionText(window));
             Assert.Equal(string.Empty, GetFeedbackText(window));
-            Assert.Equal("\u2659", GetSquareViewModel(e2).PieceGlyph);
-            Assert.Equal(string.Empty, GetSquareViewModel(e4).PieceGlyph);
+            AssertSquareHasPieceAsset(e2, "white-pawn");
+            AssertSquareHasNoPieceAsset(e4);
             Assert.Equal("Keyboard focus: e2.", GetFocusedSquareText(window));
         }
         finally
@@ -470,6 +470,28 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public void PieceAssets_RenderOnLightAndDarkSquares()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+
+            var d1 = FindSquareButton(window, "d1");
+            var e1 = FindSquareButton(window, "e1");
+
+            AssertSquareUsesSvgPrimaryAsset(d1, "white-queen");
+            AssertSquareUsesSvgPrimaryAsset(e1, "white-king");
+            Assert.NotEqual(d1.Background, e1.Background);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void FinishedGameState_ShowsResultAndBlocksMoveInteraction()
     {
         var finishedState = new GameState(
@@ -541,6 +563,28 @@ public sealed class MainWindowUiIntegrationTests
     private static BoardSquareViewModel GetSquareViewModel(Button squareButton)
     {
         return Assert.IsType<BoardSquareViewModel>(squareButton.DataContext);
+    }
+
+    private static void AssertSquareHasNoPieceAsset(Button squareButton)
+    {
+        var squareViewModel = GetSquareViewModel(squareButton);
+        Assert.Null(squareViewModel.PieceImage);
+        Assert.Equal(string.Empty, squareViewModel.PieceAssetUri);
+    }
+
+    private static void AssertSquareHasPieceAsset(Button squareButton, string expectedAssetStem)
+    {
+        var squareViewModel = GetSquareViewModel(squareButton);
+        Assert.NotNull(squareViewModel.PieceImage);
+        Assert.Contains($"/{expectedAssetStem}.", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static void AssertSquareUsesSvgPrimaryAsset(Button squareButton, string expectedAssetStem)
+    {
+        var squareViewModel = GetSquareViewModel(squareButton);
+        Assert.NotNull(squareViewModel.PieceImage);
+        Assert.EndsWith($"/{expectedAssetStem}.svg", squareViewModel.PieceAssetUri, StringComparison.OrdinalIgnoreCase);
+        Assert.False(squareViewModel.IsUsingFallbackAsset);
     }
 
     private static void Click(Button button)

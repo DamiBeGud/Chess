@@ -22,4 +22,8 @@
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets/Pieces/ClassicOutline/**" />
+  </ItemGroup>
 </Project>

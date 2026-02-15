@@ -1,9 +1,11 @@
+using System;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows.Input;
 using Avalonia;
 using Avalonia.Media;
 using Chess.Domain;
+using Chess.UI.Assets;
 
 namespace Chess.UI.ViewModels;
 
@@ -18,18 +20,24 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
     private static readonly Thickness DefaultBorderThickness = new(0);
     private static readonly Thickness FocusedBorderThickness = new(3);
 
+    private readonly IPieceAssetResolver _pieceAssetResolver;
     private Piece? _piece;
+    private IImage? _pieceImage;
+    private string _pieceAssetUri = string.Empty;
+    private bool _isUsingFallbackAsset;
     private bool _isSelected;
     private bool _isLegalDestination;
     private bool _isKeyboardFocused;
 
-    public BoardSquareViewModel(Square square, ICommand clickCommand)
+    public BoardSquareViewModel(Square square, ICommand clickCommand, IPieceAssetResolver pieceAssetResolver)
     {
         System.ArgumentNullException.ThrowIfNull(clickCommand);
+        System.ArgumentNullException.ThrowIfNull(pieceAssetResolver);
         Square = square;
         IsLightSquare = (square.File + square.Rank) % 2 != 0;
         CoordinateLabel = $"{(char)('a' + square.File)}{square.Rank + 1}";
         ClickCommand = clickCommand;
+        _pieceAssetResolver = pieceAssetResolver;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -42,7 +50,11 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
 
     public ICommand ClickCommand { get; }
 
-    public string PieceGlyph => _piece is null ? string.Empty : GetPieceGlyph(_piece);
+    public IImage? PieceImage => _pieceImage;
+
+    public string PieceAssetUri => _pieceAssetUri;
+
+    public bool IsUsingFallbackAsset => _isUsingFallbackAsset;
 
     public IBrush Background =>
         _isSelected
@@ -69,7 +81,10 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
         }
 
         _piece = piece;
-        OnPropertyChanged(nameof(PieceGlyph));
+
+        var resolvedAsset = _piece is null ? null : _pieceAssetResolver.Resolve(_piece);
+        SetPieceAsset(resolvedAsset);
+
         OnPropertyChanged(nameof(SquareDescription));
     }
 
@@ -107,24 +122,25 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
         OnPropertyChanged(nameof(BorderThickness));
     }
 
-    private static string GetPieceGlyph(Piece piece)
+    private void SetPieceAsset(ResolvedPieceAsset? resolvedAsset)
     {
-        return (piece.Color, piece.Type) switch
+        var nextImage = resolvedAsset?.Image;
+        var nextAssetUri = resolvedAsset?.AssetUri ?? string.Empty;
+        var nextIsUsingFallbackAsset = resolvedAsset?.UsedFallback ?? false;
+
+        if (ReferenceEquals(_pieceImage, nextImage)
+            && string.Equals(_pieceAssetUri, nextAssetUri, StringComparison.Ordinal)
+            && _isUsingFallbackAsset == nextIsUsingFallbackAsset)
         {
-            (PieceColor.White, PieceType.King) => "\u2654",
-            (PieceColor.White, PieceType.Queen) => "\u2655",
-            (PieceColor.White, PieceType.Rook) => "\u2656",
-            (PieceColor.White, PieceType.Bishop) => "\u2657",
-            (PieceColor.White, PieceType.Knight) => "\u2658",
-            (PieceColor.White, PieceType.Pawn) => "\u2659",
-            (PieceColor.Black, PieceType.King) => "\u265A",
-            (PieceColor.Black, PieceType.Queen) => "\u265B",
-            (PieceColor.Black, PieceType.Rook) => "\u265C",
-            (PieceColor.Black, PieceType.Bishop) => "\u265D",
-            (PieceColor.Black, PieceType.Knight) => "\u265E",
-            (PieceColor.Black, PieceType.Pawn) => "\u265F",
-            _ => string.Empty
-        };
+            return;
+        }
+
+        _pieceImage = nextImage;
+        _pieceAssetUri = nextAssetUri;
+        _isUsingFallbackAsset = nextIsUsingFallbackAsset;
+        OnPropertyChanged(nameof(PieceImage));
+        OnPropertyChanged(nameof(PieceAssetUri));
+        OnPropertyChanged(nameof(IsUsingFallbackAsset));
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)

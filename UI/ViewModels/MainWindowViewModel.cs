@@ -8,6 +8,7 @@ using System.Windows.Input;
 using Avalonia.Input;
 using Chess.AppCore;
 using Chess.Domain;
+using Chess.UI.Assets;
 using Chess.UI.Commands;
 
 namespace Chess.UI.ViewModels;
@@ -19,6 +20,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private static readonly IReadOnlyList<string> DefaultRankCoordinates = BuildRankCoordinates();
 
     private readonly IGameSessionService _gameSessionService;
+    private readonly IPieceAssetResolver _pieceAssetResolver;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
     private readonly HashSet<Square> _legalDestinationSquares = [];
     private Square? _selectedSquare;
@@ -29,9 +31,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private string _focusedSquareText = string.Empty;
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
+        : this(gameSessionService, new PieceAssetResolver())
+    {
+    }
+
+    public MainWindowViewModel(IGameSessionService gameSessionService, IPieceAssetResolver pieceAssetResolver)
     {
         System.ArgumentNullException.ThrowIfNull(gameSessionService);
+        System.ArgumentNullException.ThrowIfNull(pieceAssetResolver);
         _gameSessionService = gameSessionService;
+        _pieceAssetResolver = pieceAssetResolver;
 
         var squares = BuildBoardSquares();
         _boardSquares = new ReadOnlyCollection<BoardSquareViewModel>(squares);
@@ -349,7 +358,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             for (var file = 0; file < 8; file++)
             {
                 var square = new Square(file, rank);
-                var squareViewModel = new BoardSquareViewModel(square, new RelayCommand(() => OnSquareClicked(square)));
+                var squareViewModel = new BoardSquareViewModel(
+                    square,
+                    new RelayCommand(() => OnSquareClicked(square)),
+                    _pieceAssetResolver);
                 boardSquares.Add(squareViewModel);
             }
         }
