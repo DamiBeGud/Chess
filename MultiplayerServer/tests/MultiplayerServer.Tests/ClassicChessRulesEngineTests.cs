@@ -4,6 +4,23 @@ namespace MultiplayerServer.Tests;
 
 public sealed class ClassicChessRulesEngineTests
 {
+    [Theory]
+    [InlineData("z2", "e4")]
+    [InlineData("e2", "e9")]
+    [InlineData("e2", "99")]
+    public void TryApplyMove_InvalidCoordinates_IsRejectedWithInvalidCoordinatesReason(string from, string to)
+    {
+        var engine = new ClassicChessRulesEngine();
+        var match = CreateInitialMatchState();
+        var originalBoard = (char[])match.Board.Clone();
+
+        var outcome = engine.TryApplyMove(match, MatchSeats.Creator, from, to, null);
+
+        var rejected = Assert.IsType<MoveRejectedOutcome>(outcome);
+        Assert.Equal(MoveRejectionReason.InvalidCoordinates, rejected.Reason);
+        Assert.Equal(originalBoard, match.Board);
+    }
+
     [Fact]
     public void TryApplyMove_InvalidPromotion_IsRejectedWithInvalidPromotionReason()
     {
@@ -41,6 +58,27 @@ public sealed class ClassicChessRulesEngineTests
         Assert.Equal(MoveRejectionReason.IllegalMove, rejected.Reason);
         Assert.Equal('P', PieceAt(match.Board, "e2"));
         Assert.Equal('.', PieceAt(match.Board, "e5"));
+    }
+
+    [Fact]
+    public void TryApplyMove_RepresentativeLegalMoveSequence_AppliesDeterministicTransitions()
+    {
+        var engine = new ClassicChessRulesEngine();
+        var match = CreateInitialMatchState();
+
+        var whiteAdvance = engine.TryApplyMove(match, MatchSeats.Creator, "e2", "e4", null);
+        var blackAdvance = engine.TryApplyMove(match, MatchSeats.Joiner, "e7", "e5", null);
+        var whiteKnight = engine.TryApplyMove(match, MatchSeats.Creator, "g1", "f3", null);
+
+        Assert.IsType<MoveAppliedOutcome>(whiteAdvance);
+        Assert.IsType<MoveAppliedOutcome>(blackAdvance);
+        Assert.IsType<MoveAppliedOutcome>(whiteKnight);
+        Assert.Equal('.', PieceAt(match.Board, "e2"));
+        Assert.Equal('P', PieceAt(match.Board, "e4"));
+        Assert.Equal('.', PieceAt(match.Board, "e7"));
+        Assert.Equal('p', PieceAt(match.Board, "e5"));
+        Assert.Equal('.', PieceAt(match.Board, "g1"));
+        Assert.Equal('N', PieceAt(match.Board, "f3"));
     }
 
     private static MatchState CreateInitialMatchState()

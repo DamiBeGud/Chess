@@ -71,6 +71,25 @@ public sealed class MatchLifecycleHttpIntegrationTests
         Assert.Equal(MatchProtocolConstants.ErrorMatchFull, payload.Code);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task JoinMatch_MissingJoinCodeReturnsBadRequestWithExplicitCode(string? joinCode)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        var joinResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/join",
+            new JoinMatchRequest(joinCode));
+
+        Assert.Equal(HttpStatusCode.BadRequest, joinResponse.StatusCode);
+        var payload = await joinResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorJoinCodeRequired, payload.Code);
+    }
+
     [Fact]
     public async Task SubmitMove_AcceptedMoveUpdatesCanonicalStateAndTurn()
     {
@@ -191,6 +210,90 @@ public sealed class MatchLifecycleHttpIntegrationTests
         var payload = await moveResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
         Assert.NotNull(payload);
         Assert.Equal(MatchProtocolConstants.ErrorMatchNotReady, payload.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SubmitMove_MissingMatchIdReturnsBadRequestWithExplicitCode(string? matchId)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(matchId, created.CreatorToken, "e2", "e4"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorMatchIdRequired, payload.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task SubmitMove_MissingPlayerTokenReturnsBadRequestWithExplicitCode(string? playerToken)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, playerToken, "e2", "e4"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorPlayerTokenRequired, payload.Code);
+    }
+
+    [Theory]
+    [InlineData(null, "e4")]
+    [InlineData("e2", null)]
+    [InlineData("", "e4")]
+    [InlineData("e2", "   ")]
+    public async Task SubmitMove_MissingCoordinatesReturnBadRequestWithExplicitCode(string? from, string? to)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, from, to));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorMoveCoordinatesRequired, payload.Code);
+    }
+
+    [Fact]
+    public async Task SubmitMove_InvalidCoordinateFormatReturnsIllegalMoveConflict()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var invalidCoordinateResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, "z9", "e4"));
+
+        Assert.Equal(HttpStatusCode.Conflict, invalidCoordinateResponse.StatusCode);
+        var invalidCoordinatePayload = await invalidCoordinateResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(invalidCoordinatePayload);
+        Assert.Equal(MatchProtocolConstants.ErrorIllegalMove, invalidCoordinatePayload.Code);
+
+        var legalMoveResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, "e2", "e4"));
+
+        Assert.Equal(HttpStatusCode.OK, legalMoveResponse.StatusCode);
     }
 
     [Fact]

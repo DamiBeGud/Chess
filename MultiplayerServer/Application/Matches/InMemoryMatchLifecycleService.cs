@@ -236,7 +236,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     match.SideToMove);
 
                 var snapshot = _snapshotFactory.Create(match);
-                return new SubmitMoveSucceeded(new SubmitMoveSuccess(true, snapshot));
+                return new SubmitMoveSucceeded(new SubmitMoveSuccess(snapshot));
             });
     }
 

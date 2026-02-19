@@ -39,9 +39,7 @@ public abstract record SubmitMoveOutcome;
 
 public sealed record SubmitMoveSucceeded(SubmitMoveSuccess Response) : SubmitMoveOutcome;
 
-public sealed record SubmitMoveSuccess(
-    bool Accepted,
-    MatchSnapshot Snapshot);
+public sealed record SubmitMoveSuccess(MatchSnapshot Snapshot);
 
 public sealed record MatchSnapshot(
     string MatchId,
