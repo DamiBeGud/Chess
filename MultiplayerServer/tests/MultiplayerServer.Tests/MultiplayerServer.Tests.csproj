@@ -4,6 +4,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
@@ -18,5 +19,12 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\MultiplayerServer.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Remove="bin/**" />
+    <None Remove="obj/**" />
+    <Content Remove="bin/**" />
+    <Content Remove="obj/**" />
   </ItemGroup>
 </Project>

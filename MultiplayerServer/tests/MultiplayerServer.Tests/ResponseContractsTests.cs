@@ -30,7 +30,15 @@ public sealed class ResponseContractsTests
         Assert.Equal("White", MatchProtocolConstants.CreatorSeat);
         Assert.Equal("Black", MatchProtocolConstants.JoinerSeat);
         Assert.Equal("join_code_required", MatchProtocolConstants.ErrorJoinCodeRequired);
+        Assert.Equal("match_id_required", MatchProtocolConstants.ErrorMatchIdRequired);
+        Assert.Equal("player_token_required", MatchProtocolConstants.ErrorPlayerTokenRequired);
+        Assert.Equal("move_coordinates_required", MatchProtocolConstants.ErrorMoveCoordinatesRequired);
         Assert.Equal("match_not_found", MatchProtocolConstants.ErrorMatchNotFound);
+        Assert.Equal("match_not_ready", MatchProtocolConstants.ErrorMatchNotReady);
         Assert.Equal("match_full", MatchProtocolConstants.ErrorMatchFull);
+        Assert.Equal("invalid_player_token", MatchProtocolConstants.ErrorInvalidPlayerToken);
+        Assert.Equal("invalid_promotion", MatchProtocolConstants.ErrorInvalidPromotion);
+        Assert.Equal("out_of_turn", MatchProtocolConstants.ErrorOutOfTurn);
+        Assert.Equal("illegal_move", MatchProtocolConstants.ErrorIllegalMove);
     }
 }

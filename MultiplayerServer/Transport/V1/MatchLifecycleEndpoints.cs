@@ -10,6 +10,7 @@ public static class MatchLifecycleEndpoints
     {
         group.MapPost(ServerRouteConventions.ApiV1Matches, CreateMatch);
         group.MapPost(ServerRouteConventions.ApiV1MatchesJoin, JoinMatch);
+        group.MapPost(ServerRouteConventions.ApiV1MatchesMoves, SubmitMove);
         return group;
     }
 
@@ -34,6 +35,37 @@ public static class MatchLifecycleEndpoints
             MatchProtocolConstants.ErrorMatchNotFound => TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
             MatchProtocolConstants.ErrorMatchFull => TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
             _ => TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
+        };
+    }
+
+    public static IResult SubmitMove(SubmitMoveRequest request, IMatchLifecycleService lifecycleService)
+    {
+        var result = lifecycleService.SubmitMove(
+            request.MatchId,
+            request.PlayerToken,
+            request.From,
+            request.To,
+            request.Promotion);
+        if (result.IsSuccess)
+        {
+            return TypedResults.Ok(result.Response!);
+        }
+
+        var failure = result.Failure!;
+        return failure.Code switch
+        {
+            MatchProtocolConstants.ErrorMatchNotFound =>
+                TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
+            MatchProtocolConstants.ErrorInvalidPlayerToken =>
+                TypedResults.Json(new ApiErrorResponse(failure.Code, failure.Message), statusCode: StatusCodes.Status403Forbidden),
+            MatchProtocolConstants.ErrorMatchNotReady or
+            MatchProtocolConstants.ErrorOutOfTurn or
+            MatchProtocolConstants.ErrorIllegalMove =>
+                TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
+            MatchProtocolConstants.ErrorInvalidPromotion =>
+                TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),
+            _ =>
+                TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
         };
     }
 }
