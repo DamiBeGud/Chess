@@ -50,14 +50,14 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
         }
     }
 
-    public JoinMatchResult JoinMatch(string? joinCode)
+    public JoinMatchOutcome JoinMatch(string? joinCode)
     {
         if (string.IsNullOrWhiteSpace(joinCode))
         {
             _logger.LogWarning(
                 "Join rejected with {ErrorCode}",
                 MatchProtocolConstants.ErrorJoinCodeRequired);
-            return JoinMatchResult.Failed(
+            return new JoinMatchFailed(
                 new JoinMatchFailure(
                     MatchProtocolConstants.ErrorJoinCodeRequired,
                     "joinCode is required."));
@@ -73,7 +73,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                 _logger.LogWarning(
                     "Join rejected with {ErrorCode}",
                     MatchProtocolConstants.ErrorMatchNotFound);
-                return JoinMatchResult.Failed(
+                return new JoinMatchFailed(
                     new JoinMatchFailure(
                         MatchProtocolConstants.ErrorMatchNotFound,
                         "Match was not found."));
@@ -85,7 +85,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     "Join rejected for {MatchId} with {ErrorCode}",
                     match.MatchId,
                     MatchProtocolConstants.ErrorMatchFull);
-                return JoinMatchResult.Failed(
+                return new JoinMatchFailed(
                     new JoinMatchFailure(
                         MatchProtocolConstants.ErrorMatchFull,
                         "Match already has two players."));
@@ -99,16 +99,16 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                 MatchProtocolConstants.JoinerSeat);
 
             // Deterministic seat assignment (MS-002): creator is White, first joiner is Black.
-            return JoinMatchResult.Success(
+            return new JoinMatchSucceeded(
                 new JoinMatchResponse(match.MatchId, MatchProtocolConstants.JoinerSeat, joinerToken));
         }
     }
 
-    public SubmitMoveResult SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion)
+    public SubmitMoveOutcome SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion)
     {
         if (string.IsNullOrWhiteSpace(matchId))
         {
-            return SubmitMoveResult.Failed(
+            return new SubmitMoveFailed(
                 new SubmitMoveFailure(
                     MatchProtocolConstants.ErrorMatchIdRequired,
                     "matchId is required."));
@@ -116,7 +116,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
 
         if (string.IsNullOrWhiteSpace(playerToken))
         {
-            return SubmitMoveResult.Failed(
+            return new SubmitMoveFailed(
                 new SubmitMoveFailure(
                     MatchProtocolConstants.ErrorPlayerTokenRequired,
                     "playerToken is required."));
@@ -124,7 +124,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
 
         if (string.IsNullOrWhiteSpace(from) || string.IsNullOrWhiteSpace(to))
         {
-            return SubmitMoveResult.Failed(
+            return new SubmitMoveFailed(
                 new SubmitMoveFailure(
                     MatchProtocolConstants.ErrorMoveCoordinatesRequired,
                     "from and to are required."));
@@ -141,7 +141,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                 "Move rejected with {ErrorCode}; invalid promotion value {Promotion}",
                 MatchProtocolConstants.ErrorInvalidPromotion,
                 normalizedPromotion);
-            return SubmitMoveResult.Failed(
+            return new SubmitMoveFailed(
                 new SubmitMoveFailure(
                     MatchProtocolConstants.ErrorInvalidPromotion,
                     "promotion must be one of Q, R, B, or N."));
@@ -155,7 +155,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     "Move rejected with {ErrorCode}; match {MatchId} not found",
                     MatchProtocolConstants.ErrorMatchNotFound,
                     normalizedMatchId);
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorMatchNotFound,
                         "Match was not found."));
@@ -167,7 +167,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     "Move rejected for {MatchId} with {ErrorCode}",
                     match.MatchId,
                     MatchProtocolConstants.ErrorMatchNotReady);
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorMatchNotReady,
                         "Match is waiting for the second player."));
@@ -180,7 +180,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     "Move rejected for {MatchId} with {ErrorCode}",
                     match.MatchId,
                     MatchProtocolConstants.ErrorInvalidPlayerToken);
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorInvalidPlayerToken,
                         "playerToken is not valid for this match."));
@@ -194,7 +194,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     MatchProtocolConstants.ErrorOutOfTurn,
                     match.SideToMove,
                     seat);
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorOutOfTurn,
                         "It is not this player's turn."));
@@ -203,7 +203,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
             if (!TryParseSquare(normalizedFrom, out var fromSquare) ||
                 !TryParseSquare(normalizedTo, out var toSquare))
             {
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorIllegalMove,
                         "Move format is invalid. Use coordinates like e2 and e4."));
@@ -217,7 +217,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     MatchProtocolConstants.ErrorIllegalMove,
                     normalizedFrom,
                     normalizedTo);
-                return SubmitMoveResult.Failed(
+                return new SubmitMoveFailed(
                     new SubmitMoveFailure(
                         MatchProtocolConstants.ErrorIllegalMove,
                         "Move is not legal."));
@@ -236,7 +236,7 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                 match.SideToMove);
 
             var snapshot = BuildSnapshot(match);
-            return SubmitMoveResult.Success(new SubmitMoveResponse(true, snapshot));
+            return new SubmitMoveSucceeded(new SubmitMoveResponse(true, snapshot));
         }
     }
 

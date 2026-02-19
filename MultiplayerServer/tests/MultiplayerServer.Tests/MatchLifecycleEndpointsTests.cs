@@ -26,9 +26,10 @@ public sealed class MatchLifecycleEndpointsTests
     public void JoinMatch_SecondPlayerSucceedsAndIsAssignedBlackSeatDeterministically()
     {
         var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
         var created = lifecycleService.CreateMatch();
 
-        var joinResult = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService);
+        var joinResult = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService, errorMapper);
 
         var okResult = Assert.IsType<Ok<JoinMatchResponse>>(joinResult.Result);
         Assert.Equal(created.MatchId, okResult.Value!.MatchId);
@@ -43,12 +44,13 @@ public sealed class MatchLifecycleEndpointsTests
     public void JoinMatch_ThirdPlayerAttemptReturnsConflictWithMatchFullErrorCode()
     {
         var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
         var created = lifecycleService.CreateMatch();
 
-        var firstJoin = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService);
+        var firstJoin = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService, errorMapper);
         Assert.IsType<Ok<JoinMatchResponse>>(firstJoin.Result);
 
-        var thirdJoin = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService);
+        var thirdJoin = MatchLifecycleEndpoints.JoinMatch(new JoinMatchRequest(created.JoinCode), lifecycleService, errorMapper);
 
         var conflict = Assert.IsType<Conflict<ApiErrorResponse>>(thirdJoin.Result);
         Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);

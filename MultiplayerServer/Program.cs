@@ -9,7 +9,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddSignalR();
-builder.Services.AddSingleton<IMatchLifecycleService, InMemoryMatchLifecycleService>();
+builder.Services.AddSingleton<InMemoryMatchLifecycleService>();
+builder.Services.AddSingleton<ICreateMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IJoinMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<ISubmitMoveUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IMatchLifecycleService>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IMatchErrorHttpMapper, V1MatchErrorHttpMapper>();
 
 var app = builder.Build();
 var logger = app.Logger;

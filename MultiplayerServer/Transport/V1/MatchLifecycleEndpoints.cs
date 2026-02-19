@@ -14,31 +14,30 @@ public static class MatchLifecycleEndpoints
         return group;
     }
 
-    public static Ok<CreateMatchResponse> CreateMatch(IMatchLifecycleService lifecycleService)
+    public static Ok<CreateMatchResponse> CreateMatch(ICreateMatchUseCase lifecycleService)
     {
         return TypedResults.Ok(lifecycleService.CreateMatch());
     }
 
     public static Results<Ok<JoinMatchResponse>, BadRequest<ApiErrorResponse>, NotFound<ApiErrorResponse>, Conflict<ApiErrorResponse>>
-        JoinMatch(JoinMatchRequest request, IMatchLifecycleService lifecycleService)
+        JoinMatch(
+            JoinMatchRequest request,
+            IJoinMatchUseCase lifecycleService,
+            IMatchErrorHttpMapper errorHttpMapper)
     {
         var result = lifecycleService.JoinMatch(request.JoinCode);
-        if (result.IsSuccess)
+        return result switch
         {
-            return TypedResults.Ok(result.Response!);
-        }
-
-        var failure = result.Failure!;
-        return failure.Code switch
-        {
-            MatchProtocolConstants.ErrorJoinCodeRequired => TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorMatchNotFound => TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorMatchFull => TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
-            _ => TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
+            JoinMatchSucceeded success => TypedResults.Ok(success.Response),
+            JoinMatchFailed failed => errorHttpMapper.MapJoinFailure(failed.Error),
+            _ => throw new InvalidOperationException($"Unsupported join outcome type: {result.GetType().Name}")
         };
     }
 
-    public static IResult SubmitMove(SubmitMoveRequest request, IMatchLifecycleService lifecycleService)
+    public static IResult SubmitMove(
+        SubmitMoveRequest request,
+        ISubmitMoveUseCase lifecycleService,
+        IMatchErrorHttpMapper errorHttpMapper)
     {
         var result = lifecycleService.SubmitMove(
             request.MatchId,
@@ -46,26 +45,11 @@ public static class MatchLifecycleEndpoints
             request.From,
             request.To,
             request.Promotion);
-        if (result.IsSuccess)
+        return result switch
         {
-            return TypedResults.Ok(result.Response!);
-        }
-
-        var failure = result.Failure!;
-        return failure.Code switch
-        {
-            MatchProtocolConstants.ErrorMatchNotFound =>
-                TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorInvalidPlayerToken =>
-                TypedResults.Json(new ApiErrorResponse(failure.Code, failure.Message), statusCode: StatusCodes.Status403Forbidden),
-            MatchProtocolConstants.ErrorMatchNotReady or
-            MatchProtocolConstants.ErrorOutOfTurn or
-            MatchProtocolConstants.ErrorIllegalMove =>
-                TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorInvalidPromotion =>
-                TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),
-            _ =>
-                TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
+            SubmitMoveSucceeded success => TypedResults.Ok(success.Response),
+            SubmitMoveFailed failed => errorHttpMapper.MapSubmitMoveFailure(failed.Error),
+            _ => throw new InvalidOperationException($"Unsupported submit-move outcome type: {result.GetType().Name}")
         };
     }
 }

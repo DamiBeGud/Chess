@@ -2,49 +2,35 @@ using MultiplayerServer.Contracts.V1;
 
 namespace MultiplayerServer.Application.Matches;
 
-public interface IMatchLifecycleService
+public interface ICreateMatchUseCase
 {
     CreateMatchResponse CreateMatch();
-    JoinMatchResult JoinMatch(string? joinCode);
-    SubmitMoveResult SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion);
 }
 
-public sealed record JoinMatchResult(
-    bool IsSuccess,
-    JoinMatchResponse? Response,
-    JoinMatchFailure? Failure)
+public interface IJoinMatchUseCase
 {
-    public static JoinMatchResult Success(JoinMatchResponse response)
-    {
-        return new JoinMatchResult(true, response, null);
-    }
-
-    public static JoinMatchResult Failed(JoinMatchFailure failure)
-    {
-        return new JoinMatchResult(false, null, failure);
-    }
+    JoinMatchOutcome JoinMatch(string? joinCode);
 }
 
-public sealed record JoinMatchFailure(
-    string Code,
-    string Message);
-
-public sealed record SubmitMoveResult(
-    bool IsSuccess,
-    SubmitMoveResponse? Response,
-    SubmitMoveFailure? Failure)
+public interface ISubmitMoveUseCase
 {
-    public static SubmitMoveResult Success(SubmitMoveResponse response)
-    {
-        return new SubmitMoveResult(true, response, null);
-    }
-
-    public static SubmitMoveResult Failed(SubmitMoveFailure failure)
-    {
-        return new SubmitMoveResult(false, null, failure);
-    }
+    SubmitMoveOutcome SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion);
 }
 
-public sealed record SubmitMoveFailure(
-    string Code,
-    string Message);
+public interface IMatchLifecycleService : ICreateMatchUseCase, IJoinMatchUseCase, ISubmitMoveUseCase;
+
+public abstract record JoinMatchOutcome;
+
+public sealed record JoinMatchSucceeded(JoinMatchResponse Response) : JoinMatchOutcome;
+
+public sealed record JoinMatchFailed(JoinMatchFailure Error) : JoinMatchOutcome;
+
+public sealed record JoinMatchFailure(string Code, string Message);
+
+public abstract record SubmitMoveOutcome;
+
+public sealed record SubmitMoveSucceeded(SubmitMoveResponse Response) : SubmitMoveOutcome;
+
+public sealed record SubmitMoveFailed(SubmitMoveFailure Error) : SubmitMoveOutcome;
+
+public sealed record SubmitMoveFailure(string Code, string Message);
