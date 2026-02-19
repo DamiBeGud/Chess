@@ -30,3 +30,29 @@ npm run test:junit
 ```
 
 This writes test results to `./reports/newman-results.xml`.
+
+## Coverage
+
+The collection covers all HTTP endpoints currently exposed:
+
+- `GET /health`
+- `GET /api/v1`
+- `POST /api/v1/matches`
+- `POST /api/v1/matches/join`
+- `POST /api/v1/matches/moves`
+
+It includes positive flow plus negative contract checks for:
+
+- `join_code_required`
+- `match_not_found` (join + moves)
+- `match_full`
+- `match_not_ready`
+- `invalid_player_token`
+- `out_of_turn`
+- `invalid_promotion`
+- `match_id_required`
+- `player_token_required`
+- `move_coordinates_required`
+- `illegal_move`
+
+MS-005 realtime-only paths (`grace_expired`, `seat_not_reconnectable`, `unauthorized_resume`, `match_already_ended` after disconnect timeout) are validated by integration tests via SignalR, not by Newman HTTP requests.

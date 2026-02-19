@@ -486,6 +486,240 @@
             "url": "{{baseUrl}}/api/v1/matches/moves"
           },
           "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/join -> 404 match_not_found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_not_found');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"joinCode\": \"ZZZZZZ\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/join"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/join -> 409 match_full",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_full');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"joinCode\": \"{{joinCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/join"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 400 match_id_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_id_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"   \",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"e2\",\n  \"to\": \"e4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 400 player_token_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('player_token_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"   \",\n  \"from\": \"e2\",\n  \"to\": \"e4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 400 move_coordinates_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('move_coordinates_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"\",\n  \"to\": \"e4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 409 illegal_move (invalid coordinates)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('illegal_move');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"z9\",\n  \"to\": \"e4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
         }
       ]
     }
