@@ -349,6 +349,35 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public void HandleKeyboardInput_AtBoardEdge_ClampsFocusWithinBoard()
+    {
+        var viewModel = CreateViewModel();
+
+        for (var step = 0; step < 10; step++)
+        {
+            Assert.True(viewModel.HandleKeyboardInput(Key.A));
+            Assert.True(viewModel.HandleKeyboardInput(Key.S));
+        }
+
+        Assert.Equal("Keyboard focus: a1.", viewModel.FocusedSquareText);
+        Assert.True(viewModel.HandleKeyboardInput(Key.Left));
+        Assert.True(viewModel.HandleKeyboardInput(Key.Down));
+        Assert.Equal("Keyboard focus: a1.", viewModel.FocusedSquareText);
+    }
+
+    [Fact]
+    public void HandleKeyboardInput_WithUnmappedKey_ReturnsFalse()
+    {
+        var viewModel = CreateViewModel();
+        var focusedSquareTextBeforeInput = viewModel.FocusedSquareText;
+
+        var handled = viewModel.HandleKeyboardInput(Key.F1);
+
+        Assert.False(handled);
+        Assert.Equal(focusedSquareTextBeforeInput, viewModel.FocusedSquareText);
+    }
+
+    [Fact]
     public void HandleKeyboardInput_WasdAndSpace_AppliesMoveFromFocusedSquare()
     {
         var viewModel = CreateViewModel();
@@ -570,6 +599,20 @@ public sealed class MainWindowViewModelTests
         await WaitForConditionAsync(() => requeueProbeService.TryPlayTurnCallCount >= 2);
 
         Assert.Equal(2, requeueProbeService.TryPlayTurnCallCount);
+    }
+
+    [Fact]
+    public async Task PlayVsAi_WhenAiMoveThrows_ShowsFailureFeedbackAndClearsThinkingState()
+    {
+        var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
+        var viewModel = new MainWindowViewModel(session, CreateTestAssetResolver(), new ThrowingAiTurnService());
+        viewModel.AiControlledColor = PieceColor.White;
+        viewModel.IsPlayVsAiEnabled = true;
+
+        await WaitForConditionAsync(() =>
+            viewModel.FeedbackText.StartsWith("AI move failed: simulated AI failure", StringComparison.Ordinal));
+
+        Assert.False(viewModel.IsAiThinking);
     }
 
     private static MainWindowViewModel CreateViewModel()
@@ -802,6 +845,22 @@ public sealed class MainWindowViewModelTests
             Interlocked.Increment(ref _tryPlayTurnCallCount);
             await Task.Delay(30, cancellationToken);
             return null;
+        }
+    }
+
+    private sealed class ThrowingAiTurnService : IAiTurnService
+    {
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return true;
+        }
+
+        public Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            throw new InvalidOperationException("simulated AI failure");
         }
     }
 }

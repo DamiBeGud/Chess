@@ -13,6 +13,7 @@ using Chess.AppCore;
 using Chess.Domain;
 using Chess.UI.Assets;
 using Chess.UI.Commands;
+using Chess.UI.Services;
 
 namespace Chess.UI.ViewModels;
 
@@ -31,11 +32,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IGameSessionService _gameSessionService;
     private readonly IAiTurnService _aiTurnService;
     private readonly IPieceAssetResolver _pieceAssetResolver;
+    private readonly IMainWindowSelectionState _selectionState;
+    private readonly IMainWindowTextFormatter _textFormatter;
+    private readonly IMainWindowKeyboardNavigator _keyboardNavigator;
+    private readonly IMainWindowAiTurnCoordinator _aiTurnCoordinator;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
-    private readonly HashSet<Square> _legalDestinationSquares = [];
-    private Square? _selectedSquare;
-    private bool _hasMovedFocusSinceSelection;
-    private Square _focusedSquare = DefaultKeyboardFocusSquare;
     private string _gameStatusText = string.Empty;
     private string _lastActionText = string.Empty;
     private string _feedbackText = string.Empty;
@@ -46,9 +47,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private bool _isPlayVsAiEnabled;
     private PieceColor _aiControlledColor = PieceColor.Black;
     private int _aiSearchDepth = 2;
-    private bool _isAiTurnInProgress;
-    private readonly object _aiTurnSyncRoot = new();
-    private CancellationTokenSource? _aiTurnCancellationSource;
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
         : this(gameSessionService, new PieceAssetResolver(), new NoOpAiTurnService())
@@ -69,13 +67,41 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IGameSessionService gameSessionService,
         IPieceAssetResolver pieceAssetResolver,
         IAiTurnService aiTurnService)
+        : this(
+            gameSessionService,
+            pieceAssetResolver,
+            aiTurnService,
+            new MainWindowSelectionState(DefaultKeyboardFocusSquare),
+            new MainWindowTextFormatter(pieceAssetResolver),
+            new MainWindowKeyboardNavigator(),
+            new MainWindowAiTurnCoordinator(aiTurnService))
     {
-        System.ArgumentNullException.ThrowIfNull(gameSessionService);
-        System.ArgumentNullException.ThrowIfNull(pieceAssetResolver);
-        System.ArgumentNullException.ThrowIfNull(aiTurnService);
+    }
+
+    internal MainWindowViewModel(
+        IGameSessionService gameSessionService,
+        IPieceAssetResolver pieceAssetResolver,
+        IAiTurnService aiTurnService,
+        IMainWindowSelectionState selectionState,
+        IMainWindowTextFormatter textFormatter,
+        IMainWindowKeyboardNavigator keyboardNavigator,
+        IMainWindowAiTurnCoordinator aiTurnCoordinator)
+    {
+        ArgumentNullException.ThrowIfNull(gameSessionService);
+        ArgumentNullException.ThrowIfNull(pieceAssetResolver);
+        ArgumentNullException.ThrowIfNull(aiTurnService);
+        ArgumentNullException.ThrowIfNull(selectionState);
+        ArgumentNullException.ThrowIfNull(textFormatter);
+        ArgumentNullException.ThrowIfNull(keyboardNavigator);
+        ArgumentNullException.ThrowIfNull(aiTurnCoordinator);
+
         _gameSessionService = gameSessionService;
         _pieceAssetResolver = pieceAssetResolver;
         _aiTurnService = aiTurnService;
+        _selectionState = selectionState;
+        _textFormatter = textFormatter;
+        _keyboardNavigator = keyboardNavigator;
+        _aiTurnCoordinator = aiTurnCoordinator;
 
         var squares = BuildBoardSquares();
         _boardSquares = new ReadOnlyCollection<BoardSquareViewModel>(squares);
@@ -196,7 +222,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public IReadOnlyList<int> AvailableAiSearchDepths => DefaultAiSearchDepths;
 
-    public bool IsAiThinking => _isAiTurnInProgress;
+    public bool IsAiThinking => _aiTurnCoordinator.IsAiTurnInProgress;
 
     public bool IsAiAvailable => _aiTurnService is not NoOpAiTurnService;
 
@@ -239,7 +265,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             if (!value)
             {
-                CancelInFlightAiTurn();
+                _aiTurnCoordinator.CancelInFlightAiTurn();
             }
 
             _isPlayVsAiEnabled = value;
@@ -267,7 +293,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
             if (IsPlayVsAiEnabled)
             {
-                CancelInFlightAiTurn();
+                _aiTurnCoordinator.CancelInFlightAiTurn();
                 QueueAiTurnIfNeeded();
             }
         }
@@ -291,7 +317,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public void StartNewGame()
     {
-        CancelInFlightAiTurn();
+        _aiTurnCoordinator.CancelInFlightAiTurn();
         _gameSessionService.StartNewGame();
         ClearSelection();
         SetFocusedSquare(DefaultKeyboardFocusSquare);
@@ -337,7 +363,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         try
         {
-            CancelInFlightAiTurn();
+            _aiTurnCoordinator.CancelInFlightAiTurn();
             await _gameSessionService.LoadAsync(filePath, cancellationToken);
             ClearSelection();
             SetFocusedSquare(DefaultKeyboardFocusSquare);
@@ -358,26 +384,14 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool HandleKeyboardInput(Key key)
     {
-        switch (key)
+        var action = _keyboardNavigator.Resolve(key);
+
+        switch (action.Kind)
         {
-            case Key.Left:
-            case Key.A:
-                MoveFocusedSquare(-1, 0);
+            case MainWindowKeyboardActionKind.MoveFocus:
+                MoveFocusedSquare(action.FileDelta, action.RankDelta);
                 return true;
-            case Key.Right:
-            case Key.D:
-                MoveFocusedSquare(1, 0);
-                return true;
-            case Key.Up:
-            case Key.W:
-                MoveFocusedSquare(0, 1);
-                return true;
-            case Key.Down:
-            case Key.S:
-                MoveFocusedSquare(0, -1);
-                return true;
-            case Key.Enter:
-            case Key.Space:
+            case MainWindowKeyboardActionKind.CommitFocusedSquare:
                 if (IsHumanInputBlockedByAiTurn())
                 {
                     FeedbackText = BuildAiThinkingFeedback();
@@ -385,9 +399,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     return true;
                 }
 
-                OnSquareClicked(_focusedSquare);
+                OnSquareClicked(_selectionState.FocusedSquare);
                 return true;
-            case Key.Escape:
+            case MainWindowKeyboardActionKind.ClearSelection:
                 ClearSelection();
                 FeedbackText = "Selection cleared.";
                 return true;
@@ -414,14 +428,13 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (_selectedSquare is null)
+        if (_selectionState.SelectedSquare is null)
         {
             TrySelectSquare(square, currentState);
             return;
         }
 
-        var selectedSquare = _selectedSquare.Value;
-
+        var selectedSquare = _selectionState.SelectedSquare.Value;
         if (selectedSquare == square)
         {
             ClearSelection();
@@ -429,7 +442,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (_legalDestinationSquares.Contains(square))
+        if (_selectionState.IsLegalDestination(square))
         {
             ExecuteMove(selectedSquare, square, currentState);
             return;
@@ -441,20 +454,23 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        FeedbackText = BuildInvalidMoveTargetFeedback(square, selectedSquare);
+        FeedbackText = _textFormatter.BuildInvalidMoveTargetFeedback(
+            square,
+            selectedSquare,
+            _selectionState.LegalDestinationSquares);
     }
 
     private void TrySelectSquare(Square square, GameState currentState)
     {
         if (!TryGetPieceAt(currentState, square, out var piece))
         {
-            FeedbackText = $"No piece at {ToCoordinate(square)}. Select one of your {currentState.SideToMove} pieces.";
+            FeedbackText = _textFormatter.BuildNoPieceSelectionFeedback(square, currentState.SideToMove);
             return;
         }
 
         if (piece!.Color != currentState.SideToMove)
         {
-            FeedbackText = $"Cannot select {piece.Color} piece at {ToCoordinate(square)}. It is {currentState.SideToMove} to move.";
+            FeedbackText = _textFormatter.BuildOpponentPieceSelectionFeedback(piece, square, currentState.SideToMove);
             return;
         }
 
@@ -465,16 +481,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         if (_gameSessionService.TryMakeMove(fromSquare, toSquare))
         {
-            var movedPieceName = TryGetPieceAt(previousState, fromSquare, out var movingPiece)
-                ? movingPiece!.Type.ToString()
-                : "Piece";
-
-            LastActionText = $"Last action: {previousState.SideToMove} moved {movedPieceName} from {ToCoordinate(fromSquare)} to {ToCoordinate(toSquare)}.";
+            PieceType? movedPieceType = TryGetPieceAt(previousState, fromSquare, out var movingPiece)
+                ? movingPiece!.Type
+                : null;
+            LastActionText = _textFormatter.BuildHumanMoveLastAction(previousState, fromSquare, toSquare, movedPieceType);
             FeedbackText = string.Empty;
         }
         else
         {
-            FeedbackText = $"Move rejected: {ToCoordinate(fromSquare)} -> {ToCoordinate(toSquare)}.";
+            FeedbackText = _textFormatter.BuildMoveRejectedFeedback(fromSquare, toSquare);
         }
 
         ClearSelection();
@@ -484,24 +499,15 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private bool SelectSquare(Square square)
     {
-        _selectedSquare = square;
-        _hasMovedFocusSinceSelection = false;
-        _legalDestinationSquares.Clear();
-
-        foreach (var move in _gameSessionService.GetLegalMovesFrom(square))
-        {
-            _legalDestinationSquares.Add(move.To);
-        }
-
+        var legalMoves = _gameSessionService.GetLegalMovesFrom(square);
+        var hasLegalMoves = _selectionState.SelectSquare(square, legalMoves);
         UpdateSquareHighlights();
-        return _legalDestinationSquares.Count > 0;
+        return hasLegalMoves;
     }
 
     private void ClearSelection()
     {
-        _selectedSquare = null;
-        _hasMovedFocusSinceSelection = false;
-        _legalDestinationSquares.Clear();
+        _selectionState.ClearSelection();
         UpdateSquareHighlights();
     }
 
@@ -519,39 +525,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                 && (squareViewModel.Square == lastMoveFromSquare || squareViewModel.Square == lastMoveToSquare));
         }
 
-        GameStatusText = BuildGameStatusText(currentState);
-        MoveHistoryEntries = BuildMoveHistoryEntries(currentState.MoveHistory);
+        GameStatusText = _textFormatter.BuildGameStatusText(currentState);
+        MoveHistoryEntries = _textFormatter.BuildMoveHistoryEntries(currentState.MoveHistory);
     }
 
     private void UpdateSquareHighlights()
     {
-        foreach (var squareViewModel in _boardSquares)
-        {
-            var isSelected = _selectedSquare is not null && squareViewModel.Square == _selectedSquare.Value;
-            var isLegalDestination = _showLegalMoveSuggestions
-                && _legalDestinationSquares.Contains(squareViewModel.Square);
-            var isKeyboardFocused = squareViewModel.Square == _focusedSquare;
-
-            squareViewModel.SetSelected(isSelected);
-            squareViewModel.SetLegalDestination(isLegalDestination);
-            squareViewModel.SetKeyboardFocused(isKeyboardFocused);
-        }
+        _selectionState.ApplyHighlights(_boardSquares, _showLegalMoveSuggestions);
     }
 
     private bool IsHumanInputBlockedByAiTurn()
     {
-        if (!IsPlayVsAiEnabled)
-        {
-            return false;
-        }
-
-        if (_isAiTurnInProgress)
-        {
-            return true;
-        }
-
-        var currentState = _gameSessionService.CurrentGameState;
-        return currentState.Status == GameStatus.InProgress && currentState.SideToMove == AiControlledColor;
+        return _aiTurnCoordinator.IsHumanInputBlockedByAiTurn(
+            IsPlayVsAiEnabled,
+            AiControlledColor,
+            _gameSessionService.CurrentGameState);
     }
 
     private string BuildAiThinkingFeedback()
@@ -561,165 +549,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private void QueueAiTurnIfNeeded()
     {
-        if (!IsPlayVsAiEnabled || _isAiTurnInProgress)
-        {
-            return;
-        }
-
-        if (!_aiTurnService.CanRequestMove(AiControlledColor))
-        {
-            return;
-        }
-
-        var aiTurnCancellationSource = TryBeginAiTurn();
-        if (aiTurnCancellationSource is null)
-        {
-            return;
-        }
-
-        _ = PlayAiTurnAsync(aiTurnCancellationSource);
-    }
-
-    private async Task PlayAiTurnAsync(CancellationTokenSource aiTurnCancellationSource)
-    {
-        if (_isAiTurnInProgress)
-        {
-            CompleteAiTurn(aiTurnCancellationSource);
-            return;
-        }
-
-        _isAiTurnInProgress = true;
-        OnPropertyChanged(nameof(IsAiThinking));
-        FeedbackText = BuildAiThinkingFeedback();
-        var shouldRequeueAiTurn = false;
-
-        try
-        {
-            var aiMove = await _aiTurnService.TryPlayTurnAsync(
-                AiControlledColor,
-                AiSearchDepth,
-                aiTurnCancellationSource.Token);
-            if (aiMove is not null)
+        _aiTurnCoordinator.QueueAiTurnIfNeeded(
+            isPlayVsAiEnabledProvider: () => IsPlayVsAiEnabled,
+            aiControlledColorProvider: () => AiControlledColor,
+            aiSearchDepthProvider: () => AiSearchDepth,
+            aiThinkingFeedbackProvider: BuildAiThinkingFeedback,
+            setFeedback: feedback => FeedbackText = feedback,
+            setLastActionFromAiMove: aiMove => LastActionText = _textFormatter.BuildAiMoveLastAction(AiControlledColor, aiMove),
+            clearSelectionAndRefreshBoard: () =>
             {
-                LastActionText = $"Last action: AI ({AiControlledColor}) moved {aiMove.MovedPiece.Type} from {ToCoordinate(aiMove.From)} to {ToCoordinate(aiMove.To)}.";
-            }
-            else if (IsPlayVsAiEnabled && _aiTurnService.CanRequestMove(AiControlledColor))
-            {
-                shouldRequeueAiTurn = true;
-            }
-
-            ClearSelection();
-            RefreshBoardFromCurrentState();
-            FeedbackText = string.Empty;
-        }
-        catch (OperationCanceledException)
-        {
-            FeedbackText = IsPlayVsAiEnabled ? "AI move canceled." : string.Empty;
-            shouldRequeueAiTurn = IsPlayVsAiEnabled && _aiTurnService.CanRequestMove(AiControlledColor);
-        }
-        catch (Exception exception)
-        {
-            FeedbackText = $"AI move failed: {exception.Message}";
-        }
-        finally
-        {
-            _isAiTurnInProgress = false;
-            OnPropertyChanged(nameof(IsAiThinking));
-            CompleteAiTurn(aiTurnCancellationSource);
-            if (shouldRequeueAiTurn)
-            {
-                QueueAiTurnIfNeeded();
-            }
-        }
-    }
-
-    private CancellationTokenSource? TryBeginAiTurn()
-    {
-        lock (_aiTurnSyncRoot)
-        {
-            if (_aiTurnCancellationSource is not null)
-            {
-                return null;
-            }
-
-            _aiTurnCancellationSource = new CancellationTokenSource();
-            return _aiTurnCancellationSource;
-        }
-    }
-
-    private void CancelInFlightAiTurn()
-    {
-        CancellationTokenSource? cancellationSource;
-        lock (_aiTurnSyncRoot)
-        {
-            cancellationSource = _aiTurnCancellationSource;
-            _aiTurnCancellationSource = null;
-        }
-
-        if (cancellationSource is null)
-        {
-            return;
-        }
-
-        try
-        {
-            cancellationSource.Cancel();
-        }
-        catch (ObjectDisposedException)
-        {
-        }
-        finally
-        {
-            cancellationSource.Dispose();
-        }
-    }
-
-    private void CompleteAiTurn(CancellationTokenSource cancellationSource)
-    {
-        var shouldDispose = false;
-        lock (_aiTurnSyncRoot)
-        {
-            if (ReferenceEquals(_aiTurnCancellationSource, cancellationSource))
-            {
-                _aiTurnCancellationSource = null;
-                shouldDispose = true;
-            }
-        }
-
-        if (!shouldDispose)
-        {
-            return;
-        }
-
-        cancellationSource.Dispose();
+                ClearSelection();
+                RefreshBoardFromCurrentState();
+            },
+            notifyIsAiThinkingChanged: () => OnPropertyChanged(nameof(IsAiThinking)));
     }
 
     private void MoveFocusedSquare(int fileDelta, int rankDelta)
     {
-        var movementOrigin = _selectedSquare is not null && !_hasMovedFocusSinceSelection
-            ? _selectedSquare.Value
-            : _focusedSquare;
-        var nextFile = Math.Clamp(movementOrigin.File + fileDelta, 0, 7);
-        var nextRank = Math.Clamp(movementOrigin.Rank + rankDelta, 0, 7);
-        SetFocusedSquare(new Square(nextFile, nextRank));
-
-        if (_selectedSquare is not null)
-        {
-            _hasMovedFocusSinceSelection = true;
-        }
+        _selectionState.MoveFocusedSquare(fileDelta, rankDelta);
+        FocusedSquareText = _textFormatter.BuildFocusedSquareText(_selectionState.FocusedSquare);
+        UpdateSquareHighlights();
     }
 
     private void SetFocusedSquare(Square square)
     {
-        var nextFocusedSquareText = $"Keyboard focus: {ToCoordinate(square)}.";
-
-        if (_focusedSquare == square && FocusedSquareText == nextFocusedSquareText)
-        {
-            return;
-        }
-
-        _focusedSquare = square;
-        FocusedSquareText = nextFocusedSquareText;
+        _selectionState.SetFocusedSquare(square);
+        FocusedSquareText = _textFormatter.BuildFocusedSquareText(_selectionState.FocusedSquare);
         UpdateSquareHighlights();
     }
 
@@ -728,18 +583,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         var hasLegalMoves = SelectSquare(square);
         FeedbackText = hasLegalMoves
             ? string.Empty
-            : $"Selected square {ToCoordinate(square)} has no legal moves.";
-    }
-
-    private string BuildInvalidMoveTargetFeedback(Square targetSquare, Square selectedSquare)
-    {
-        var legalDestinationsText = _legalDestinationSquares.Count == 0
-            ? "none"
-            : string.Join(", ", _legalDestinationSquares
-                .Select(ToCoordinate)
-                .OrderBy(coordinate => coordinate));
-
-        return $"Invalid move target: {ToCoordinate(targetSquare)}. Legal destinations from {ToCoordinate(selectedSquare)}: {legalDestinationsText}.";
+            : _textFormatter.BuildNoLegalMovesFeedback(square);
     }
 
     private static bool TryGetPieceAt(GameState gameState, Square square, out Piece? piece)
@@ -792,87 +636,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
 
         return boardSquares;
-    }
-
-    private static string ToCoordinate(Square square)
-    {
-        return $"{(char)('a' + square.File)}{square.Rank + 1}";
-    }
-
-    private static string BuildGameStatusText(GameState gameState)
-    {
-        return gameState.Status switch
-        {
-            GameStatus.InProgress => $"Status: In progress. Side to move: {gameState.SideToMove}.",
-            GameStatus.WhiteWin => "Status: White wins.",
-            GameStatus.BlackWin => "Status: Black wins.",
-            GameStatus.Draw => "Status: Draw.",
-            _ => $"Status: {gameState.Status}."
-        };
-    }
-
-    private IReadOnlyList<MoveHistoryEntryViewModel> BuildMoveHistoryEntries(IReadOnlyList<Move> moveHistory)
-    {
-        if (moveHistory.Count == 0)
-        {
-            return Array.Empty<MoveHistoryEntryViewModel>();
-        }
-
-        var entries = new List<MoveHistoryEntryViewModel>(moveHistory.Count);
-
-        for (var index = 0; index < moveHistory.Count; index++)
-        {
-            var move = moveHistory[index];
-            var moveNumber = (index / 2) + 1;
-            var movePrefix = $"{moveNumber}.";
-            var resolvedPieceAsset = _pieceAssetResolver.Resolve(move.MovedPiece);
-            entries.Add(
-                new MoveHistoryEntryViewModel(
-                    movePrefix,
-                    move.MovedPiece.Type,
-                    move.MovedPiece.Color,
-                    BuildMoveNotation(move),
-                    resolvedPieceAsset));
-        }
-
-        return entries;
-    }
-
-    private static string BuildMoveNotation(Move move)
-    {
-        if (move.IsCastling)
-        {
-            return move.To.File > move.From.File ? "O-O" : "O-O-O";
-        }
-
-        var separator = move.CapturedPiece is not null || move.IsEnPassant ? "x" : "-";
-        var notation = $"{ToCoordinate(move.From)}{separator}{ToCoordinate(move.To)}";
-
-        if (move.PromotionPieceType is not null)
-        {
-            notation = $"{notation}={ToPromotionSymbol(move.PromotionPieceType.Value)}";
-        }
-
-        if (move.IsEnPassant)
-        {
-            notation = $"{notation} e.p.";
-        }
-
-        return notation;
-    }
-
-    private static string ToPromotionSymbol(PieceType pieceType)
-    {
-        return pieceType switch
-        {
-            PieceType.Queen => "Q",
-            PieceType.Rook => "R",
-            PieceType.Bishop => "B",
-            PieceType.Knight => "N",
-            PieceType.King => "K",
-            PieceType.Pawn => "P",
-            _ => pieceType.ToString()
-        };
     }
 
     private static IReadOnlyList<string> BuildFileCoordinates()
