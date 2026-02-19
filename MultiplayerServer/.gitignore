@@ -1,0 +1,67 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug*/
+[Rr]elease*/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+[Bb]uild/
+bld/
+[Bb]uild[Ll]og.*
+publish/
+
+# IDE/editor files
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userprefs
+*.csproj.user
+*.sln.docstates
+*.sln.iml
+
+# ReSharper / Rider
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Test and coverage
+[Tt]est[Rr]esult*/
+TestResults/
+*.trx
+*.coverage
+*.coveragexml
+coverage/
+coverage.*
+[Bb]enchmark[Dd]ot[Nn]et.Artifacts/
+
+# NuGet / packages
+*.nupkg
+*.snupkg
+*.nuspec
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+!**/[Pp]ackages/repositories.config
+.nuget/packages/
+artifacts/
+project.lock.json
+project.fragment.lock.json
+
+# Logs and diagnostics
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+
+# Certificates / secrets (local only)
+*.pfx
+*.snk
+secrets.json
+
+# Project-specific local docs
+.docs/
