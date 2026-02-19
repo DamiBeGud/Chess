@@ -1,0 +1,443 @@
+{
+  "info": {
+    "_postman_id": "d565763f-8958-4fe4-97a1-3173f06849fd",
+    "name": "MultiplayerServer API (v1)",
+    "description": "Collection for currently available MultiplayerServer HTTP endpoints.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Smoke",
+      "item": [
+        {
+          "name": "GET /health",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.status).to.eql('ok');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "GET /api/v1",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.service).to.eql('MultiplayerServer');",
+                  "pm.expect(payload.version).to.eql('v1');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Match Flow",
+      "item": [
+        {
+          "name": "POST /api/v1/matches (Create Match)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload).to.have.property('matchId');",
+                  "pm.expect(payload).to.have.property('joinCode');",
+                  "pm.expect(payload).to.have.property('creatorToken');",
+                  "",
+                  "pm.collectionVariables.set('matchId', payload.matchId);",
+                  "pm.collectionVariables.set('joinCode', payload.joinCode);",
+                  "pm.collectionVariables.set('creatorToken', payload.creatorToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/matches"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/join (Join Match)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.matchId).to.eql(pm.collectionVariables.get('matchId'));",
+                  "pm.expect(payload.seat).to.eql('Black');",
+                  "pm.expect(payload).to.have.property('playerToken');",
+                  "",
+                  "pm.collectionVariables.set('joinerToken', payload.playerToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"joinCode\": \"{{joinCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/join"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves (White Move)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.accepted).to.eql(true);",
+                  "pm.expect(payload.snapshot.matchId).to.eql(pm.collectionVariables.get('matchId'));",
+                  "pm.expect(payload.snapshot.sideToMove).to.eql('Black');",
+                  "pm.collectionVariables.set('lastMoveNumber', String(payload.snapshot.moveNumber));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"{{whiteFrom}}\",\n  \"to\": \"{{whiteTo}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves (Black Move)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.accepted).to.eql(true);",
+                  "pm.expect(payload.snapshot.matchId).to.eql(pm.collectionVariables.get('matchId'));",
+                  "pm.expect(payload.snapshot.sideToMove).to.eql('White');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{joinerToken}}\",\n  \"from\": \"{{blackFrom}}\",\n  \"to\": \"{{blackTo}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Negative Cases",
+      "item": [
+        {
+          "name": "POST /api/v1/matches (Create Match For Not Ready)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.collectionVariables.set('pendingMatchId', payload.matchId);",
+                  "pm.collectionVariables.set('pendingCreatorToken', payload.creatorToken);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{baseUrl}}/api/v1/matches"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 409 match_not_ready",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_not_ready');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{pendingMatchId}}\",\n  \"playerToken\": \"{{pendingCreatorToken}}\",\n  \"from\": \"e2\",\n  \"to\": \"e4\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 403 invalid_player_token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('invalid_player_token');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"not-a-real-token\",\n  \"from\": \"a2\",\n  \"to\": \"a3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 404 match_not_found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_not_found');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{unknownMatchId}}\",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"a2\",\n  \"to\": \"a3\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "joinCode",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "matchId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "creatorToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "joinerToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pendingMatchId",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "pendingCreatorToken",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "unknownMatchId",
+      "value": "00000000000000000000000000000000",
+      "type": "string"
+    },
+    {
+      "key": "whiteFrom",
+      "value": "e2",
+      "type": "string"
+    },
+    {
+      "key": "whiteTo",
+      "value": "e4",
+      "type": "string"
+    },
+    {
+      "key": "blackFrom",
+      "value": "e7",
+      "type": "string"
+    },
+    {
+      "key": "blackTo",
+      "value": "e5",
+      "type": "string"
+    },
+    {
+      "key": "lastMoveNumber",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

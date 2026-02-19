@@ -1,0 +1,13 @@
+{
+  "name": "multiplayer-server-postman-newman",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Newman runner for MultiplayerServer Postman collection",
+  "scripts": {
+    "test": "newman run ./MultiplayerServer.v1.postman_collection.json -e ./local.postman_environment.json --reporters cli",
+    "test:junit": "newman run ./MultiplayerServer.v1.postman_collection.json -e ./local.postman_environment.json --reporters cli,junit --reporter-junit-export ./reports/newman-results.xml"
+  },
+  "devDependencies": {
+    "newman": "^6.2.1"
+  }
+}
