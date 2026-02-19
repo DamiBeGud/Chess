@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http.HttpResults;
 using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
+using MultiplayerServer.Hubs.V1;
 
 namespace MultiplayerServer.Transport.V1;
 
@@ -39,10 +40,14 @@ public static class MatchLifecycleEndpoints
         };
     }
 
-    public static IResult SubmitMove(
+    public static async Task<IResult> SubmitMove(
         SubmitMoveRequest request,
         ISubmitMoveUseCase lifecycleService,
-        IMatchErrorHttpMapper errorHttpMapper)
+        IMatchErrorHttpMapper errorHttpMapper,
+        IMatchSyncDispatchGate dispatchGate,
+        IMatchSyncPublisher syncPublisher,
+        IMatchSyncEventIdGenerator eventIdGenerator,
+        CancellationToken cancellationToken)
     {
         var result = lifecycleService.SubmitMove(
             request.MatchId,
@@ -50,29 +55,34 @@ public static class MatchLifecycleEndpoints
             request.From,
             request.To,
             request.Promotion);
-        return result switch
+        switch (result)
         {
-            null => throw new InvalidOperationException("Submit-move outcome must not be null."),
-            SubmitMoveSucceeded { Response: { Snapshot: { } snapshot } } when IsValidSnapshot(snapshot) => TypedResults.Ok(
-                new SubmitMoveResponse(
-                    true,
-                    ToContractSnapshot(snapshot))),
-            SubmitMoveSucceeded => throw new InvalidOperationException(
-                "Submit-move success outcome must include a valid snapshot payload."),
-            SubmitMoveFailed { Error: { } error } => errorHttpMapper.MapSubmitMoveFailure(error),
-            SubmitMoveFailed => throw new InvalidOperationException(
-                "Submit-move failure outcome must include an error payload."),
-            _ => throw new InvalidOperationException($"Unsupported submit-move outcome type: {result.GetType().Name}")
-        };
-    }
+            case null:
+                throw new InvalidOperationException("Submit-move outcome must not be null.");
+            case SubmitMoveSucceeded { Response: { Snapshot: { } snapshot } } when IsValidSnapshot(snapshot):
+            {
+                await using var dispatchLease = await dispatchGate.AcquireAsync(snapshot.MatchId, CancellationToken.None);
+                await syncPublisher.PublishMatchUpdatedAsync(
+                    snapshot,
+                    eventIdGenerator.Generate(),
+                    CancellationToken.None);
 
-    private static MatchSnapshotResponse ToContractSnapshot(MatchSnapshot snapshot)
-    {
-        return new MatchSnapshotResponse(
-            snapshot.MatchId,
-            snapshot.SideToMove,
-            snapshot.MoveNumber,
-            snapshot.Board);
+                return TypedResults.Ok(
+                    new SubmitMoveResponse(
+                        true,
+                        MatchContractMapper.ToContractSnapshot(snapshot)));
+            }
+            case SubmitMoveSucceeded:
+                throw new InvalidOperationException(
+                    "Submit-move success outcome must include a valid snapshot payload.");
+            case SubmitMoveFailed { Error: { } error }:
+                return errorHttpMapper.MapSubmitMoveFailure(error);
+            case SubmitMoveFailed:
+                throw new InvalidOperationException(
+                    "Submit-move failure outcome must include an error payload.");
+            default:
+                throw new InvalidOperationException($"Unsupported submit-move outcome type: {result.GetType().Name}");
+        }
     }
 
     private static bool IsValidJoinSuccess(JoinMatchSuccess response)

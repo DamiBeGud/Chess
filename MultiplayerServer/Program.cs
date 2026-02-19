@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.AspNetCore.Authentication;
 using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
 using MultiplayerServer.Hubs.V1;
@@ -9,6 +10,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddSignalR();
+builder.Services
+    .AddAuthentication(PlayerTokenAuthenticationDefaults.Scheme)
+    .AddScheme<AuthenticationSchemeOptions, PlayerTokenAuthenticationHandler>(
+        PlayerTokenAuthenticationDefaults.Scheme,
+        _ => { });
+builder.Services.AddAuthorization();
 builder.Services.AddSingleton<IMatchRepository, InMemoryMatchRepository>();
 builder.Services.AddSingleton<IMatchIdGenerator, GuidMatchIdGenerator>();
 builder.Services.AddSingleton<IJoinCodeGenerator, RandomJoinCodeGenerator>();
@@ -19,8 +26,14 @@ builder.Services.AddSingleton<InMemoryMatchLifecycleService>();
 builder.Services.AddSingleton<ICreateMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IJoinMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<ISubmitMoveUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IGetMatchSnapshotUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IMatchLifecycleService>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IMatchErrorHttpMapper, V1MatchErrorHttpMapper>();
+builder.Services.AddSingleton<IMatchConnectionRegistry, InMemoryMatchConnectionRegistry>();
+builder.Services.AddSingleton<IMatchSyncDispatchGate, InMemoryMatchSyncDispatchGate>();
+builder.Services.AddSingleton<IMatchSyncEventIdGenerator, GuidMatchSyncEventIdGenerator>();
+builder.Services.AddSingleton<IMatchSyncSequencer, InMemoryMatchSyncSequencer>();
+builder.Services.AddSingleton<IMatchSyncPublisher, V1MatchSyncPublisher>();
 
 var app = builder.Build();
 var logger = app.Logger;
@@ -78,13 +91,17 @@ app.Use(async (context, next) =>
     }
 });
 
+app.UseAuthentication();
+app.UseAuthorization();
+
 app.MapGet(ServerRouteConventions.Health, () => Results.Ok(HealthResponse.OkNow()));
 
 var apiV1 = app.MapGroup(ServerRouteConventions.ApiV1Prefix);
 apiV1.MapGet(ServerRouteConventions.ApiV1Root, () => Results.Ok(ApiInfoResponse.V1()));
 apiV1.MapMatchLifecycleEndpoints();
 
-app.MapHub<MatchHub>(ServerRouteConventions.MatchHubV1);
+app.MapHub<MatchHub>(ServerRouteConventions.MatchHubV1)
+    .RequireAuthorization();
 
 app.Run();
 

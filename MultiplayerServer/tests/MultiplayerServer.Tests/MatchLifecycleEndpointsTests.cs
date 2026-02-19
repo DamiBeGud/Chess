@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
+using MultiplayerServer.Hubs.V1;
 using MultiplayerServer.Transport.V1;
 using System.Linq;
 
@@ -9,6 +10,10 @@ namespace MultiplayerServer.Tests;
 
 public sealed class MatchLifecycleEndpointsTests
 {
+    private static readonly IMatchSyncDispatchGate NoOpDispatchGate = new NoOpMatchSyncDispatchGate();
+    private static readonly IMatchSyncPublisher NoOpPublisher = new NoOpMatchSyncPublisher();
+    private static readonly IMatchSyncEventIdGenerator EventIdGenerator = new FixedMatchSyncEventIdGenerator();
+
     [Fact]
     public void CreateMatch_ReturnsMatchIdJoinCodeAndCreatorToken()
     {
@@ -56,6 +61,53 @@ public sealed class MatchLifecycleEndpointsTests
         var conflict = Assert.IsType<Conflict<ApiErrorResponse>>(thirdJoin.Result);
         Assert.Equal(StatusCodes.Status409Conflict, conflict.StatusCode);
         Assert.Equal(MatchProtocolConstants.ErrorMatchFull, conflict.Value!.Code);
+    }
+
+    [Fact]
+    public async Task SubmitMove_AcceptedMove_PublishesRealtimeUpdate()
+    {
+        var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
+        var publisher = new CapturingMatchSyncPublisher();
+        var created = lifecycleService.CreateMatch();
+        var joined = lifecycleService.JoinMatch(created.JoinCode);
+        Assert.IsType<JoinMatchSucceeded>(joined);
+
+        var result = await MatchLifecycleEndpoints.SubmitMove(
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, "e2", "e4"),
+            lifecycleService,
+            errorMapper,
+            NoOpDispatchGate,
+            publisher,
+            EventIdGenerator,
+            CancellationToken.None);
+
+        var ok = Assert.IsType<Ok<SubmitMoveResponse>>(result);
+        Assert.NotNull(ok.Value);
+        Assert.True(ok.Value.Accepted);
+        var published = Assert.Single(publisher.PublishedUpdates);
+        Assert.Equal(created.MatchId, published.MatchId);
+    }
+
+    [Fact]
+    public async Task SubmitMove_PublishFailure_BubblesException()
+    {
+        var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
+        var publisher = new ThrowingMatchSyncPublisher();
+        var created = lifecycleService.CreateMatch();
+        var joined = lifecycleService.JoinMatch(created.JoinCode);
+        Assert.IsType<JoinMatchSucceeded>(joined);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.SubmitMove(
+                new SubmitMoveRequest(created.MatchId, created.CreatorToken, "e2", "e4"),
+                lifecycleService,
+                errorMapper,
+                NoOpDispatchGate,
+                publisher,
+                EventIdGenerator,
+                CancellationToken.None));
     }
 
     [Fact]
@@ -133,46 +185,58 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_UnsupportedOutcomeType_ThrowsInvalidOperationException()
+    public async Task SubmitMove_UnsupportedOutcomeType_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(new UnknownSubmitMoveOutcome());
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.StartsWith("Unsupported submit-move outcome type:", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public void SubmitMove_NullOutcome_ThrowsInvalidOperationException()
+    public async Task SubmitMove_NullOutcome_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(null);
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal("Submit-move outcome must not be null.", exception.Message);
     }
 
     [Fact]
-    public void SubmitMove_NullSuccessPayload_ThrowsInvalidOperationException()
+    public async Task SubmitMove_NullSuccessPayload_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(new SubmitMoveSucceeded(null!));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal(
             "Submit-move success outcome must include a valid snapshot payload.",
@@ -180,18 +244,22 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_SuccessOutcomeWithNullSnapshot_ThrowsInvalidOperationException()
+    public async Task SubmitMove_SuccessOutcomeWithNullSnapshot_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(
             new SubmitMoveSucceeded(
                 new SubmitMoveSuccess(null!)));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal(
             "Submit-move success outcome must include a valid snapshot payload.",
@@ -199,18 +267,22 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_SuccessOutcomeWithInvalidSnapshotFields_ThrowsInvalidOperationException()
+    public async Task SubmitMove_SuccessOutcomeWithInvalidSnapshotFields_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(
             new SubmitMoveSucceeded(
                 new SubmitMoveSuccess(CreateSnapshot(moveNumber: 0))));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal(
             "Submit-move success outcome must include a valid snapshot payload.",
@@ -218,18 +290,22 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_SuccessOutcomeWithInvalidSideToMove_ThrowsInvalidOperationException()
+    public async Task SubmitMove_SuccessOutcomeWithInvalidSideToMove_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(
             new SubmitMoveSucceeded(
                 new SubmitMoveSuccess(CreateSnapshot(sideToMove: "Green"))));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal(
             "Submit-move success outcome must include a valid snapshot payload.",
@@ -237,7 +313,7 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_SuccessOutcomeWithInvalidBoardSymbol_ThrowsInvalidOperationException()
+    public async Task SubmitMove_SuccessOutcomeWithInvalidBoardSymbol_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(
             new SubmitMoveSucceeded(
@@ -257,11 +333,15 @@ public sealed class MatchLifecycleEndpointsTests
                         }))));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal(
             "Submit-move success outcome must include a valid snapshot payload.",
@@ -269,16 +349,20 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
-    public void SubmitMove_NullFailurePayload_ThrowsInvalidOperationException()
+    public async Task SubmitMove_NullFailurePayload_ThrowsInvalidOperationException()
     {
         var lifecycleService = new StubSubmitMoveUseCase(new SubmitMoveFailed(null!));
         var errorMapper = new V1MatchErrorHttpMapper();
 
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            MatchLifecycleEndpoints.SubmitMove(
+        var exception = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+            await MatchLifecycleEndpoints.SubmitMove(
                 new SubmitMoveRequest("match", "token", "e2", "e4"),
                 lifecycleService,
-                errorMapper));
+                errorMapper,
+                NoOpDispatchGate,
+                NoOpPublisher,
+                EventIdGenerator,
+                CancellationToken.None));
 
         Assert.Equal("Submit-move failure outcome must include an error payload.", exception.Message);
     }
@@ -305,6 +389,110 @@ public sealed class MatchLifecycleEndpointsTests
     {
         public SubmitMoveOutcome SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion)
             => outcome!;
+    }
+
+    private sealed class NoOpMatchSyncPublisher : IMatchSyncPublisher
+    {
+        public Task PublishMatchUpdatedAsync(
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMatchSnapshotToConnectionAsync(
+            string connectionId,
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishTransportErrorToConnectionAsync(
+            string connectionId,
+            string matchId,
+            string eventId,
+            string code,
+            string message,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+    }
+
+    private sealed class NoOpMatchSyncDispatchGate : IMatchSyncDispatchGate
+    {
+        public ValueTask<IAsyncDisposable> AcquireAsync(string matchId, CancellationToken cancellationToken)
+        {
+            return ValueTask.FromResult<IAsyncDisposable>(NoOpDispatchLease.Instance);
+        }
+    }
+
+    private sealed class NoOpDispatchLease : IAsyncDisposable
+    {
+        public static readonly NoOpDispatchLease Instance = new();
+
+        public ValueTask DisposeAsync()
+            => ValueTask.CompletedTask;
+    }
+
+    private sealed class FixedMatchSyncEventIdGenerator : IMatchSyncEventIdGenerator
+    {
+        public string Generate()
+            => "fixed-transport-event-id";
+    }
+
+    private sealed class CapturingMatchSyncPublisher : IMatchSyncPublisher
+    {
+        public List<MatchSnapshot> PublishedUpdates { get; } = [];
+
+        public Task PublishMatchUpdatedAsync(
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+        {
+            PublishedUpdates.Add(snapshot);
+            return Task.CompletedTask;
+        }
+
+        public Task PublishMatchSnapshotToConnectionAsync(
+            string connectionId,
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishTransportErrorToConnectionAsync(
+            string connectionId,
+            string matchId,
+            string eventId,
+            string code,
+            string message,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+    }
+
+    private sealed class ThrowingMatchSyncPublisher : IMatchSyncPublisher
+    {
+        public Task PublishMatchUpdatedAsync(
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+        {
+            throw new InvalidOperationException("publish failed");
+        }
+
+        public Task PublishMatchSnapshotToConnectionAsync(
+            string connectionId,
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishTransportErrorToConnectionAsync(
+            string connectionId,
+            string matchId,
+            string eventId,
+            string code,
+            string message,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
     }
 
     private sealed record UnknownJoinMatchOutcome : JoinMatchOutcome;

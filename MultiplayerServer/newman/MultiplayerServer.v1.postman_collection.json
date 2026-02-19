@@ -369,6 +369,123 @@
             "url": "{{baseUrl}}/api/v1/matches/moves"
           },
           "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/join -> 400 join_code_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('join_code_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"joinCode\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/join"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 409 out_of_turn",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 409', function () {",
+                  "  pm.response.to.have.status(409);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('out_of_turn');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{joinerToken}}\",\n  \"from\": \"a7\",\n  \"to\": \"a6\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/moves -> 400 invalid_promotion",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('invalid_promotion');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{creatorToken}}\",\n  \"from\": \"a2\",\n  \"to\": \"a4\",\n  \"promotion\": \"X\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
         }
       ]
     }

@@ -15,7 +15,12 @@ public interface ISubmitMoveUseCase
     SubmitMoveOutcome SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion);
 }
 
-public interface IMatchLifecycleService : ICreateMatchUseCase, IJoinMatchUseCase, ISubmitMoveUseCase;
+public interface IGetMatchSnapshotUseCase
+{
+    GetMatchSnapshotOutcome GetMatchSnapshot(string? matchId, string? playerToken);
+}
+
+public interface IMatchLifecycleService : ICreateMatchUseCase, IJoinMatchUseCase, ISubmitMoveUseCase, IGetMatchSnapshotUseCase;
 
 public sealed record CreateMatchResult(
     string MatchId,
@@ -47,6 +52,16 @@ public sealed record MatchSnapshot(
     int MoveNumber,
     IReadOnlyList<string> Board);
 
+public abstract record GetMatchSnapshotOutcome;
+
+public sealed record GetMatchSnapshotSucceeded(GetMatchSnapshotSuccess Response) : GetMatchSnapshotOutcome;
+
+public sealed record GetMatchSnapshotSuccess(MatchSnapshot Snapshot);
+
+public sealed record GetMatchSnapshotFailed(GetMatchSnapshotFailure Error) : GetMatchSnapshotOutcome;
+
+public sealed record GetMatchSnapshotFailure(string Code, string Message);
+
 public sealed record SubmitMoveFailed(SubmitMoveFailure Error) : SubmitMoveOutcome;
 
 public sealed record SubmitMoveFailure(string Code, string Message);
@@ -61,7 +76,9 @@ public static class MatchErrorCodes
 {
     public const string JoinCodeRequired = "join_code_required";
     public const string MatchIdRequired = "match_id_required";
+    public const string InvalidMatchIdFormat = "invalid_match_id_format";
     public const string PlayerTokenRequired = "player_token_required";
+    public const string InvalidPlayerTokenFormat = "invalid_player_token_format";
     public const string MoveCoordinatesRequired = "move_coordinates_required";
     public const string MatchNotFound = "match_not_found";
     public const string MatchNotReady = "match_not_ready";

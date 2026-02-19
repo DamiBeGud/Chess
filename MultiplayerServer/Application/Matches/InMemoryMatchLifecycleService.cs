@@ -109,6 +109,61 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
             });
     }
 
+    public GetMatchSnapshotOutcome GetMatchSnapshot(string? matchId, string? playerToken)
+    {
+        if (string.IsNullOrWhiteSpace(matchId))
+        {
+            return new GetMatchSnapshotFailed(
+                new GetMatchSnapshotFailure(
+                    MatchErrorCodes.MatchIdRequired,
+                    "matchId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(playerToken))
+        {
+            return new GetMatchSnapshotFailed(
+                new GetMatchSnapshotFailure(
+                    MatchErrorCodes.PlayerTokenRequired,
+                    "playerToken is required."));
+        }
+
+        var normalizedMatchId = matchId.Trim();
+        var normalizedPlayerToken = playerToken.Trim();
+
+        return _repository.WithMatchById<GetMatchSnapshotOutcome>(
+            normalizedMatchId,
+            match =>
+            {
+                if (match is null)
+                {
+                    _logger.LogWarning(
+                        "Snapshot rejected with {ErrorCode}; match {MatchId} not found",
+                        MatchErrorCodes.MatchNotFound,
+                        normalizedMatchId);
+                    return new GetMatchSnapshotFailed(
+                        new GetMatchSnapshotFailure(
+                            MatchErrorCodes.MatchNotFound,
+                            "Match was not found."));
+                }
+
+                var seat = ResolveSeat(match, normalizedPlayerToken);
+                if (seat is null)
+                {
+                    _logger.LogWarning(
+                        "Snapshot rejected for {MatchId} with {ErrorCode}",
+                        match.MatchId,
+                        MatchErrorCodes.InvalidPlayerToken);
+                    return new GetMatchSnapshotFailed(
+                        new GetMatchSnapshotFailure(
+                            MatchErrorCodes.InvalidPlayerToken,
+                            "playerToken is not valid for this match."));
+                }
+
+                return new GetMatchSnapshotSucceeded(
+                    new GetMatchSnapshotSuccess(_snapshotFactory.Create(match)));
+            });
+    }
+
     public SubmitMoveOutcome SubmitMove(string? matchId, string? playerToken, string? from, string? to, string? promotion)
     {
         if (string.IsNullOrWhiteSpace(matchId))
