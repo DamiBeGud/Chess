@@ -1,10 +1,12 @@
 using System.Collections.Concurrent;
 using System.Net.Http.Json;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http.Connections;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.AspNetCore.SignalR.Client;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
 using MultiplayerServer.Hubs.V1;
@@ -188,7 +190,7 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
         await WaitForSignalAsync(errorSignal, "unauthorized error");
 
         var error = Assert.Single(errors);
-        Assert.Equal(MatchProtocolConstants.ErrorInvalidPlayerToken, error.Code);
+        Assert.Equal(MatchProtocolConstants.ErrorUnauthorizedResume, error.Code);
         Assert.Equal(created.MatchId, error.Metadata.MatchId);
     }
 
@@ -220,7 +222,7 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
         await WaitForSignalAsync(errorSignal, "forbidden mismatch transport error");
 
         var error = Assert.Single(errors);
-        Assert.Equal(MatchProtocolConstants.ErrorTransportForbidden, error.Code);
+        Assert.Equal(MatchProtocolConstants.ErrorUnauthorizedResume, error.Code);
         Assert.Equal(created.MatchId, error.Metadata.MatchId);
     }
 
@@ -290,6 +292,56 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
     }
 
     [Fact]
+    public async Task UnsubscribeMatch_DoesNotMarkSeatDisconnected()
+    {
+        await using var factory = CreateFactory(options => options.DisconnectGracePeriodSeconds = 1);
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        var presenceEvents = new ConcurrentQueue<MatchPresenceChangedSyncEvent>();
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+        joinerConnection.On<MatchPresenceChangedSyncEvent>(
+            MatchProtocolConstants.EventMatchPresenceChanged,
+            payload => presenceEvents.Enqueue(payload));
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.InvokeAsync("UnsubscribeMatch", created.MatchId);
+        await Task.Delay(TimeSpan.FromMilliseconds(200));
+
+        Assert.Empty(presenceEvents);
+
+        var creatorMove = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, "e2", "e4"));
+        creatorMove.EnsureSuccessStatusCode();
+
+        await Task.Delay(TimeSpan.FromSeconds(2));
+        var snapshotUseCase = factory.Services.GetRequiredService<IGetMatchSnapshotUseCase>();
+        var current = Assert.IsType<GetMatchSnapshotSucceeded>(
+            snapshotUseCase.GetMatchSnapshot(created.MatchId, created.CreatorToken)).Response.Snapshot;
+        Assert.Equal(MatchProtocolConstants.MatchStatusInProgress, current.Status);
+        Assert.True(current.Presence.Creator.IsConnected);
+        Assert.Null(current.Presence.Creator.DisconnectedUtc);
+        Assert.Null(current.Presence.Creator.GraceExpiresUtc);
+    }
+
+    [Fact]
     public async Task Publisher_DuplicateEventIdIsSuppressed_AndSequenceRemainsMonotonic()
     {
         await using var factory = new WebApplicationFactory<Program>();
@@ -330,6 +382,298 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
         Assert.True(received[1].Metadata.Sequence > received[0].Metadata.Sequence);
     }
 
+    [Fact]
+    public async Task DisconnectMidGame_ReconnectWithinGrace_SeatRestoresAndPlayContinues()
+    {
+        await using var factory = CreateFactory(options => options.DisconnectGracePeriodSeconds = 2);
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        var presenceEvents = new ConcurrentQueue<MatchPresenceChangedSyncEvent>();
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var presenceSignal = new SemaphoreSlim(0, 4);
+
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+        joinerConnection.On<MatchPresenceChangedSyncEvent>(
+            MatchProtocolConstants.EventMatchPresenceChanged,
+            payload =>
+            {
+                presenceEvents.Enqueue(payload);
+                presenceSignal.Release();
+            });
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.StopAsync();
+        await WaitForSignalAsync(presenceSignal, "creator disconnect presence");
+
+        await using var reconnected = CreateHubConnection(factory, created.CreatorToken);
+        using var reconnectSnapshotSignal = new SemaphoreSlim(0, 2);
+        reconnected.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => reconnectSnapshotSignal.Release());
+        await reconnected.StartAsync();
+        await reconnected.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await WaitForSignalAsync(reconnectSnapshotSignal, "creator reconnect snapshot");
+        await WaitForSignalAsync(presenceSignal, "creator reconnect presence");
+
+        var observedPresence = presenceEvents.ToArray();
+        Assert.True(observedPresence.Length >= 2);
+        Assert.False(observedPresence[0].Snapshot.Presence!.Creator.IsConnected);
+        Assert.True(observedPresence[^1].Snapshot.Presence!.Creator.IsConnected);
+
+        var creatorMove = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, created.CreatorToken, "e2", "e4"));
+        creatorMove.EnsureSuccessStatusCode();
+
+        var joinerMove = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, joined.PlayerToken, "e7", "e5"));
+        joinerMove.EnsureSuccessStatusCode();
+    }
+
+    [Fact]
+    public async Task DisconnectAndNeverReturn_ForfeitResolution_EndsMatchAfterGrace()
+    {
+        await using var factory = CreateFactory(options =>
+        {
+            options.DisconnectGracePeriodSeconds = 1;
+            options.AbandonmentResolution = MatchAbandonmentResolutionMode.Forfeit;
+        });
+
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var disconnectPresenceSignal = new SemaphoreSlim(0, 2);
+
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+        joinerConnection.On<MatchPresenceChangedSyncEvent>(
+            MatchProtocolConstants.EventMatchPresenceChanged,
+            payload =>
+            {
+                if (!payload.Snapshot.Presence!.Creator.IsConnected)
+                {
+                    disconnectPresenceSignal.Release();
+                }
+            });
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.StopAsync();
+        await WaitForSignalAsync(disconnectPresenceSignal, "forfeit disconnect presence", TimeSpan.FromSeconds(10));
+        var endedSnapshot = await WaitForMatchEndedSnapshotAsync(factory, created.MatchId, joined.PlayerToken);
+        Assert.Equal(MatchProtocolConstants.MatchStatusEnded, endedSnapshot.Status);
+        Assert.Equal(MatchProtocolConstants.MatchResolutionForfeit, endedSnapshot.Resolution);
+        Assert.Equal(MatchSeats.Joiner, endedSnapshot.WinnerSeat);
+
+        var moveAfterEnd = await client.PostAsJsonAsync(
+            "/api/v1/matches/moves",
+            new SubmitMoveRequest(created.MatchId, joined.PlayerToken, "e7", "e5"));
+        Assert.Equal(System.Net.HttpStatusCode.Conflict, moveAfterEnd.StatusCode);
+        var error = await moveAfterEnd.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(error);
+        Assert.Equal(MatchProtocolConstants.ErrorMatchAlreadyEnded, error.Code);
+    }
+
+    [Fact]
+    public async Task DisconnectAndNeverReturn_DrawResolution_EndsMatchAfterGrace()
+    {
+        await using var factory = CreateFactory(options =>
+        {
+            options.DisconnectGracePeriodSeconds = 1;
+            options.AbandonmentResolution = MatchAbandonmentResolutionMode.Draw;
+        });
+
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var disconnectPresenceSignal = new SemaphoreSlim(0, 2);
+
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+        joinerConnection.On<MatchPresenceChangedSyncEvent>(
+            MatchProtocolConstants.EventMatchPresenceChanged,
+            payload =>
+            {
+                if (!payload.Snapshot.Presence!.Creator.IsConnected)
+                {
+                    disconnectPresenceSignal.Release();
+                }
+            });
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.StopAsync();
+        await WaitForSignalAsync(disconnectPresenceSignal, "draw disconnect presence", TimeSpan.FromSeconds(10));
+        var endedSnapshot = await WaitForMatchEndedSnapshotAsync(factory, created.MatchId, joined.PlayerToken);
+        Assert.Equal(MatchProtocolConstants.MatchStatusEnded, endedSnapshot.Status);
+        Assert.Equal(MatchProtocolConstants.MatchResolutionDraw, endedSnapshot.Resolution);
+        Assert.Null(endedSnapshot.WinnerSeat);
+    }
+
+    [Fact]
+    public async Task UnauthorizedClient_CannotClaimDisconnectedSeat()
+    {
+        await using var factory = CreateFactory(options => options.DisconnectGracePeriodSeconds = 2);
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.StopAsync();
+
+        var outsiderToken = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        await using var outsiderConnection = CreateHubConnection(factory, outsiderToken);
+        var errors = new ConcurrentQueue<MatchErrorSyncEvent>();
+        using var errorSignal = new SemaphoreSlim(0, 2);
+        outsiderConnection.On<MatchErrorSyncEvent>(
+            MatchProtocolConstants.EventMatchError,
+            payload =>
+            {
+                errors.Enqueue(payload);
+                errorSignal.Release();
+            });
+
+        await outsiderConnection.StartAsync();
+        await Assert.ThrowsAsync<HubException>(() =>
+            outsiderConnection.InvokeAsync(
+                "SubscribeMatch",
+                created.MatchId,
+                outsiderToken));
+        await WaitForSignalAsync(errorSignal, "unauthorized resume error");
+
+        var error = Assert.Single(errors);
+        Assert.Equal(MatchProtocolConstants.ErrorUnauthorizedResume, error.Code);
+    }
+
+    [Fact]
+    public async Task ReconnectNearGraceBoundary_TimeoutWinsDeterministically()
+    {
+        var clock = new AdjustableMatchClock(new DateTimeOffset(2026, 2, 1, 12, 0, 0, TimeSpan.Zero));
+        var scheduler = new ManualDisconnectGraceScheduler();
+        await using var factory = CreateFactory(
+            options =>
+            {
+                options.DisconnectGracePeriodSeconds = 1;
+                options.AbandonmentResolution = MatchAbandonmentResolutionMode.Forfeit;
+            },
+            services =>
+            {
+                services.RemoveAll<IMatchClock>();
+                services.RemoveAll<IDisconnectGraceScheduler>();
+                services.AddSingleton<IMatchClock>(clock);
+                services.AddSingleton<IDisconnectGraceScheduler>(scheduler);
+            });
+
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+
+        await using var creatorConnection = CreateHubConnection(factory, created.CreatorToken);
+        await using var joinerConnection = CreateHubConnection(factory, joined.PlayerToken);
+        var endedEvents = new ConcurrentQueue<MatchEndedSyncEvent>();
+        using var creatorSnapshotSignal = new SemaphoreSlim(0, 2);
+        using var joinerSnapshotSignal = new SemaphoreSlim(0, 2);
+        creatorConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => creatorSnapshotSignal.Release());
+        joinerConnection.On<MatchSnapshotSyncEvent>(
+            MatchProtocolConstants.EventMatchSnapshot,
+            _ => joinerSnapshotSignal.Release());
+        joinerConnection.On<MatchEndedSyncEvent>(
+            MatchProtocolConstants.EventMatchEnded,
+            payload =>
+            {
+                endedEvents.Enqueue(payload);
+            });
+
+        await creatorConnection.StartAsync();
+        await joinerConnection.StartAsync();
+        await creatorConnection.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken);
+        await joinerConnection.InvokeAsync("SubscribeMatch", created.MatchId, joined.PlayerToken);
+        await WaitForSignalAsync(creatorSnapshotSignal, "creator initial snapshot");
+        await WaitForSignalAsync(joinerSnapshotSignal, "joiner initial snapshot");
+
+        await creatorConnection.StopAsync();
+        await WaitForConditionAsync(
+            () => scheduler.HasScheduledSeat(created.MatchId, MatchSeats.Creator),
+            "disconnect timeout scheduling");
+
+        clock.Advance(TimeSpan.FromSeconds(1));
+
+        await using var reconnecting = CreateHubConnection(factory, created.CreatorToken);
+        await reconnecting.StartAsync();
+        var reconnectAttempt = Assert.ThrowsAnyAsync<Exception>(() =>
+            reconnecting.InvokeAsync("SubscribeMatch", created.MatchId, created.CreatorToken));
+        await scheduler.TriggerSeatTimeoutAsync(created.MatchId, MatchSeats.Creator);
+        await reconnectAttempt;
+
+        await WaitForConditionAsync(
+            () => endedEvents.Any(),
+            "boundary ended event",
+            TimeSpan.FromSeconds(10));
+        var ended = Assert.Single(endedEvents);
+        Assert.Equal(MatchProtocolConstants.MatchStatusEnded, ended.Snapshot.Status);
+        Assert.Equal(MatchProtocolConstants.MatchResolutionForfeit, ended.Snapshot.Resolution);
+        Assert.Equal(MatchSeats.Joiner, ended.Snapshot.WinnerSeat);
+    }
+
     private static HubConnection CreateHubConnection(WebApplicationFactory<Program> factory, string accessToken)
     {
         var hubUri = new Uri(factory.Server.BaseAddress, ServerRouteConventions.MatchHubV1);
@@ -343,6 +687,27 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
                     options.Transports = HttpTransportType.LongPolling;
                 })
             .Build();
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(
+        Action<MatchDisconnectPolicyOptions>? configurePolicy = null,
+        Action<IServiceCollection>? configureServices = null)
+    {
+        return new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(
+                builder =>
+                {
+                    builder.ConfigureServices(
+                        services =>
+                        {
+                            if (configurePolicy is not null)
+                            {
+                                services.PostConfigure(configurePolicy);
+                            }
+
+                            configureServices?.Invoke(services);
+                        });
+                });
     }
 
     private static async Task<(CreateMatchResponse Created, JoinMatchResponse Joined)> CreateStartedMatchAsync(HttpClient client)
@@ -362,9 +727,119 @@ public sealed class MatchHubRealtimeTransportIntegrationTests
         return (created, joined);
     }
 
-    private static async Task WaitForSignalAsync(SemaphoreSlim signal, string description)
+    private static async Task<MatchSnapshot> WaitForMatchEndedSnapshotAsync(
+        WebApplicationFactory<Program> factory,
+        string matchId,
+        string playerToken,
+        TimeSpan? timeout = null)
     {
-        var signaled = await signal.WaitAsync(TimeSpan.FromSeconds(5));
+        var useCase = factory.Services.GetRequiredService<IGetMatchSnapshotUseCase>();
+        var until = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        while (DateTimeOffset.UtcNow < until)
+        {
+            var outcome = useCase.GetMatchSnapshot(matchId, playerToken);
+            if (outcome is GetMatchSnapshotSucceeded { Response: { Snapshot: { } snapshot } } &&
+                string.Equals(snapshot.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+            {
+                return snapshot;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
+        }
+
+        throw new TimeoutException($"Timed out waiting for terminal snapshot for {matchId}.");
+    }
+
+    private sealed class AdjustableMatchClock(DateTimeOffset utcNow) : IMatchClock
+    {
+        public DateTimeOffset UtcNow { get; private set; } = utcNow;
+
+        public void Advance(TimeSpan by)
+        {
+            UtcNow = UtcNow.Add(by);
+        }
+    }
+
+    private sealed class ManualDisconnectGraceScheduler : IDisconnectGraceScheduler
+    {
+        private readonly Dictionary<string, Func<CancellationToken, Task>> _callbacks =
+            new(StringComparer.OrdinalIgnoreCase);
+
+        public void ScheduleSeatGraceTimeout(
+            string matchId,
+            string seat,
+            DateTimeOffset dueUtc,
+            Func<CancellationToken, Task> onTimeoutAsync)
+        {
+            _callbacks[BuildKey(matchId, seat)] = onTimeoutAsync;
+        }
+
+        public void CancelSeatGraceTimeout(string matchId, string seat)
+        {
+            _callbacks.Remove(BuildKey(matchId, seat));
+        }
+
+        public void CancelMatchGraceTimeouts(string matchId)
+        {
+            foreach (var key in _callbacks.Keys.Where(key => key.StartsWith($"{matchId}|", StringComparison.OrdinalIgnoreCase)).ToArray())
+            {
+                _callbacks.Remove(key);
+            }
+        }
+
+        public bool HasScheduledSeat(string matchId, string seat)
+        {
+            return _callbacks.ContainsKey(BuildKey(matchId, seat));
+        }
+
+        public async Task TriggerSeatTimeoutAsync(string matchId, string seat)
+        {
+            var key = BuildKey(matchId, seat);
+            if (!_callbacks.TryGetValue(key, out var callback))
+            {
+                return;
+            }
+
+            _callbacks.Remove(key);
+            await callback(CancellationToken.None);
+        }
+
+        public void Dispose()
+        {
+            _callbacks.Clear();
+        }
+
+        private static string BuildKey(string matchId, string seat)
+        {
+            return $"{matchId}|{seat}";
+        }
+    }
+
+    private static async Task WaitForSignalAsync(
+        SemaphoreSlim signal,
+        string description,
+        TimeSpan? timeout = null)
+    {
+        var signaled = await signal.WaitAsync(timeout ?? TimeSpan.FromSeconds(5));
         Assert.True(signaled, $"Timed out waiting for {description}.");
+    }
+
+    private static async Task WaitForConditionAsync(
+        Func<bool> condition,
+        string description,
+        TimeSpan? timeout = null)
+    {
+        var until = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(5));
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (condition())
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
+        }
+
+        Assert.True(condition(), $"Timed out waiting for {description}.");
     }
 }

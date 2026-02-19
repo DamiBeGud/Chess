@@ -11,6 +11,22 @@ internal static class MatchContractMapper
             snapshot.MatchId,
             snapshot.SideToMove,
             snapshot.MoveNumber,
-            snapshot.Board);
+            snapshot.Board,
+            snapshot.Status,
+            snapshot.Resolution,
+            snapshot.WinnerSeat,
+            new MatchPresenceResponse(
+                new MatchSeatPresenceResponse(
+                    snapshot.Presence.Creator.Seat,
+                    snapshot.Presence.Creator.IsConnected,
+                    snapshot.Presence.Creator.IsReserved,
+                    snapshot.Presence.Creator.DisconnectedUtc,
+                    snapshot.Presence.Creator.GraceExpiresUtc),
+                new MatchSeatPresenceResponse(
+                    snapshot.Presence.Joiner.Seat,
+                    snapshot.Presence.Joiner.IsConnected,
+                    snapshot.Presence.Joiner.IsReserved,
+                    snapshot.Presence.Joiner.DisconnectedUtc,
+                    snapshot.Presence.Joiner.GraceExpiresUtc)));
     }
 }

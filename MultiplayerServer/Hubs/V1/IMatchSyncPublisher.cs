@@ -15,6 +15,17 @@ public interface IMatchSyncPublisher
         string eventId,
         CancellationToken cancellationToken);
 
+    Task PublishMatchPresenceChangedAsync(
+        MatchSnapshot snapshot,
+        string seat,
+        string eventId,
+        CancellationToken cancellationToken);
+
+    Task PublishMatchEndedAsync(
+        MatchSnapshot snapshot,
+        string eventId,
+        CancellationToken cancellationToken);
+
     Task PublishTransportErrorToConnectionAsync(
         string connectionId,
         string matchId,

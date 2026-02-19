@@ -98,6 +98,8 @@ public static class MatchLifecycleEndpoints
         if (string.IsNullOrWhiteSpace(snapshot.MatchId) ||
             (!string.Equals(snapshot.SideToMove, MatchSeats.Creator, StringComparison.Ordinal) &&
              !string.Equals(snapshot.SideToMove, MatchSeats.Joiner, StringComparison.Ordinal)) ||
+            (!string.Equals(snapshot.Status, MatchStatuses.InProgress, StringComparison.Ordinal) &&
+             !string.Equals(snapshot.Status, MatchStatuses.Ended, StringComparison.Ordinal)) ||
             snapshot.MoveNumber < 1 ||
             snapshot.Board is null ||
             snapshot.Board.Count != 8)
@@ -121,7 +123,41 @@ public static class MatchLifecycleEndpoints
             }
         }
 
-        return true;
+        if (!IsValidPresence(snapshot.Presence))
+        {
+            return false;
+        }
+
+        if (string.Equals(snapshot.Status, MatchStatuses.InProgress, StringComparison.Ordinal))
+        {
+            return snapshot.Resolution is null && snapshot.WinnerSeat is null;
+        }
+
+        if (!string.Equals(snapshot.Resolution, MatchResolutions.Forfeit, StringComparison.Ordinal) &&
+            !string.Equals(snapshot.Resolution, MatchResolutions.Draw, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (string.Equals(snapshot.Resolution, MatchResolutions.Draw, StringComparison.Ordinal))
+        {
+            return snapshot.WinnerSeat is null;
+        }
+
+        return string.Equals(snapshot.WinnerSeat, MatchSeats.Creator, StringComparison.Ordinal) ||
+               string.Equals(snapshot.WinnerSeat, MatchSeats.Joiner, StringComparison.Ordinal);
+    }
+
+    private static bool IsValidPresence(MatchPresenceSnapshot presence)
+    {
+        return IsValidPresenceSeat(presence.Creator, MatchSeats.Creator) &&
+               IsValidPresenceSeat(presence.Joiner, MatchSeats.Joiner);
+    }
+
+    private static bool IsValidPresenceSeat(MatchSeatPresenceSnapshot seat, string expectedSeat)
+    {
+        return string.Equals(seat.Seat, expectedSeat, StringComparison.Ordinal) &&
+               (!seat.GraceExpiresUtc.HasValue || seat.DisconnectedUtc.HasValue);
     }
 
     private static bool IsValidBoardSymbol(char piece)

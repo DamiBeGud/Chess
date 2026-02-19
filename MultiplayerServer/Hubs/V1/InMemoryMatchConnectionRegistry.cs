@@ -3,35 +3,38 @@ namespace MultiplayerServer.Hubs.V1;
 public sealed class InMemoryMatchConnectionRegistry : IMatchConnectionRegistry
 {
     private readonly object _sync = new();
-    private readonly Dictionary<string, HashSet<string>> _matchIdsByConnection = new(StringComparer.Ordinal);
 
-    public void AddSubscription(string connectionId, string matchId)
+    private readonly Dictionary<string, Dictionary<string, MatchConnectionSubscription>> _subscriptionsByConnection =
+        new(StringComparer.Ordinal);
+
+    public void AddSubscription(string connectionId, string matchId, string playerToken)
     {
         lock (_sync)
         {
-            if (!_matchIdsByConnection.TryGetValue(connectionId, out var matchIds))
+            if (!_subscriptionsByConnection.TryGetValue(connectionId, out var subscriptions))
             {
-                matchIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                _matchIdsByConnection[connectionId] = matchIds;
+                subscriptions = new Dictionary<string, MatchConnectionSubscription>(StringComparer.OrdinalIgnoreCase);
+                _subscriptionsByConnection[connectionId] = subscriptions;
             }
 
-            matchIds.Add(matchId);
+            subscriptions[matchId] = new MatchConnectionSubscription(matchId, playerToken);
         }
     }
 
-    public bool RemoveSubscription(string connectionId, string matchId)
+    public MatchConnectionSubscription? RemoveSubscription(string connectionId, string matchId)
     {
         lock (_sync)
         {
-            if (!_matchIdsByConnection.TryGetValue(connectionId, out var matchIds))
+            if (!_subscriptionsByConnection.TryGetValue(connectionId, out var subscriptions) ||
+                !subscriptions.TryGetValue(matchId, out var removed))
             {
-                return false;
+                return null;
             }
 
-            var removed = matchIds.Remove(matchId);
-            if (matchIds.Count == 0)
+            subscriptions.Remove(matchId);
+            if (subscriptions.Count == 0)
             {
-                _matchIdsByConnection.Remove(connectionId);
+                _subscriptionsByConnection.Remove(connectionId);
             }
 
             return removed;
@@ -42,22 +45,22 @@ public sealed class InMemoryMatchConnectionRegistry : IMatchConnectionRegistry
     {
         lock (_sync)
         {
-            return _matchIdsByConnection.TryGetValue(connectionId, out var matchIds) &&
-                   matchIds.Contains(matchId);
+            return _subscriptionsByConnection.TryGetValue(connectionId, out var subscriptions) &&
+                   subscriptions.ContainsKey(matchId);
         }
     }
 
-    public IReadOnlyList<string> RemoveConnection(string connectionId)
+    public IReadOnlyList<MatchConnectionSubscription> RemoveConnection(string connectionId)
     {
         lock (_sync)
         {
-            if (!_matchIdsByConnection.TryGetValue(connectionId, out var matchIds))
+            if (!_subscriptionsByConnection.TryGetValue(connectionId, out var subscriptions))
             {
-                return Array.Empty<string>();
+                return Array.Empty<MatchConnectionSubscription>();
             }
 
-            _matchIdsByConnection.Remove(connectionId);
-            return matchIds.ToArray();
+            _subscriptionsByConnection.Remove(connectionId);
+            return subscriptions.Values.ToArray();
         }
     }
 }

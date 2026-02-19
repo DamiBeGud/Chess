@@ -16,6 +16,17 @@ public sealed record MatchUpdatedSyncEvent(
     MatchSyncEventMetadata Metadata,
     MatchSnapshotResponse Snapshot);
 
+public sealed record MatchPresenceChangedSyncEvent(
+    string EventType,
+    MatchSyncEventMetadata Metadata,
+    MatchSnapshotResponse Snapshot,
+    string Seat);
+
+public sealed record MatchEndedSyncEvent(
+    string EventType,
+    MatchSyncEventMetadata Metadata,
+    MatchSnapshotResponse Snapshot);
+
 public sealed record MatchErrorSyncEvent(
     string EventType,
     MatchSyncEventMetadata Metadata,

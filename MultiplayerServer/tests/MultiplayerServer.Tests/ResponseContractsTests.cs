@@ -32,6 +32,8 @@ public sealed class ResponseContractsTests
         Assert.Equal("match.snapshot", MatchProtocolConstants.EventMatchSnapshot);
         Assert.Equal("match.updated", MatchProtocolConstants.EventMatchUpdated);
         Assert.Equal("match.error", MatchProtocolConstants.EventMatchError);
+        Assert.Equal("match.presenceChanged", MatchProtocolConstants.EventMatchPresenceChanged);
+        Assert.Equal("match.ended", MatchProtocolConstants.EventMatchEnded);
         Assert.Equal("join_code_required", MatchProtocolConstants.ErrorJoinCodeRequired);
         Assert.Equal("match_id_required", MatchProtocolConstants.ErrorMatchIdRequired);
         Assert.Equal("invalid_match_id_format", MatchProtocolConstants.ErrorInvalidMatchIdFormat);
@@ -45,7 +47,15 @@ public sealed class ResponseContractsTests
         Assert.Equal("invalid_promotion", MatchProtocolConstants.ErrorInvalidPromotion);
         Assert.Equal("out_of_turn", MatchProtocolConstants.ErrorOutOfTurn);
         Assert.Equal("illegal_move", MatchProtocolConstants.ErrorIllegalMove);
+        Assert.Equal("grace_expired", MatchProtocolConstants.ErrorGraceExpired);
+        Assert.Equal("unauthorized_resume", MatchProtocolConstants.ErrorUnauthorizedResume);
+        Assert.Equal("seat_not_reconnectable", MatchProtocolConstants.ErrorSeatNotReconnectable);
+        Assert.Equal("match_already_ended", MatchProtocolConstants.ErrorMatchAlreadyEnded);
         Assert.Equal("transport_forbidden", MatchProtocolConstants.ErrorTransportForbidden);
         Assert.Equal("transport_not_subscribed", MatchProtocolConstants.ErrorTransportNotSubscribed);
+        Assert.Equal("in_progress", MatchProtocolConstants.MatchStatusInProgress);
+        Assert.Equal("ended", MatchProtocolConstants.MatchStatusEnded);
+        Assert.Equal("forfeit", MatchProtocolConstants.MatchResolutionForfeit);
+        Assert.Equal("draw", MatchProtocolConstants.MatchResolutionDraw);
     }
 }

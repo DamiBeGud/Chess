@@ -16,17 +16,29 @@ builder.Services
         PlayerTokenAuthenticationDefaults.Scheme,
         _ => { });
 builder.Services.AddAuthorization();
+builder.Services
+    .AddOptions<MatchDisconnectPolicyOptions>()
+    .BindConfiguration(MatchDisconnectPolicyOptions.SectionName)
+    .Validate(
+        options => options.DisconnectGracePeriodSeconds is >= 1 and <= 600,
+        "DisconnectGracePeriodSeconds must be between 1 and 600 seconds.")
+    .ValidateOnStart();
 builder.Services.AddSingleton<IMatchRepository, InMemoryMatchRepository>();
 builder.Services.AddSingleton<IMatchIdGenerator, GuidMatchIdGenerator>();
 builder.Services.AddSingleton<IJoinCodeGenerator, RandomJoinCodeGenerator>();
 builder.Services.AddSingleton<IPlayerTokenGenerator, RandomPlayerTokenGenerator>();
 builder.Services.AddSingleton<IChessRulesEngine, ClassicChessRulesEngine>();
 builder.Services.AddSingleton<IMatchSnapshotFactory, MatchSnapshotFactory>();
+builder.Services.AddSingleton<IMatchClock, SystemMatchClock>();
+builder.Services.AddSingleton<IDisconnectGraceScheduler, InMemoryDisconnectGraceScheduler>();
+builder.Services.AddSingleton<IMatchLifecycleEventPublisher, V1MatchLifecycleEventPublisher>();
 builder.Services.AddSingleton<InMemoryMatchLifecycleService>();
 builder.Services.AddSingleton<ICreateMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IJoinMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<ISubmitMoveUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IGetMatchSnapshotUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IReconnectMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
+builder.Services.AddSingleton<IDisconnectMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IMatchLifecycleService>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IMatchErrorHttpMapper, V1MatchErrorHttpMapper>();
 builder.Services.AddSingleton<IMatchConnectionRegistry, InMemoryMatchConnectionRegistry>();

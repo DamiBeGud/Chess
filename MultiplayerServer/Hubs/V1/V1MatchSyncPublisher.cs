@@ -62,6 +62,48 @@ public sealed class V1MatchSyncPublisher : IMatchSyncPublisher
             .SendAsync(MatchProtocolConstants.EventMatchSnapshot, payload, cancellationToken);
     }
 
+    public async Task PublishMatchPresenceChangedAsync(
+        MatchSnapshot snapshot,
+        string seat,
+        string eventId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryCreateMetadata(snapshot.MatchId, eventId, out var metadata))
+        {
+            return;
+        }
+
+        var payload = new MatchPresenceChangedSyncEvent(
+            MatchProtocolConstants.EventMatchPresenceChanged,
+            metadata,
+            MatchContractMapper.ToContractSnapshot(snapshot),
+            seat);
+
+        await _hubContext.Clients
+            .Group(MatchHubGroupNames.ForMatch(snapshot.MatchId))
+            .SendAsync(MatchProtocolConstants.EventMatchPresenceChanged, payload, cancellationToken);
+    }
+
+    public async Task PublishMatchEndedAsync(
+        MatchSnapshot snapshot,
+        string eventId,
+        CancellationToken cancellationToken)
+    {
+        if (!TryCreateMetadata(snapshot.MatchId, eventId, out var metadata))
+        {
+            return;
+        }
+
+        var payload = new MatchEndedSyncEvent(
+            MatchProtocolConstants.EventMatchEnded,
+            metadata,
+            MatchContractMapper.ToContractSnapshot(snapshot));
+
+        await _hubContext.Clients
+            .Group(MatchHubGroupNames.ForMatch(snapshot.MatchId))
+            .SendAsync(MatchProtocolConstants.EventMatchEnded, payload, cancellationToken);
+    }
+
     public async Task PublishTransportErrorToConnectionAsync(
         string connectionId,
         string matchId,

@@ -9,7 +9,7 @@ public sealed class MatchConnectionRegistryTests
     {
         var registry = new InMemoryMatchConnectionRegistry();
 
-        registry.AddSubscription("conn-1", "match-1");
+        registry.AddSubscription("conn-1", "match-1", "token-1");
 
         Assert.True(registry.IsSubscribed("conn-1", "match-1"));
     }
@@ -21,21 +21,21 @@ public sealed class MatchConnectionRegistryTests
 
         var removed = registry.RemoveSubscription("missing", "match-1");
 
-        Assert.False(removed);
+        Assert.Null(removed);
     }
 
     [Fact]
     public void RemoveConnection_ReturnsAndClearsTrackedMatches()
     {
         var registry = new InMemoryMatchConnectionRegistry();
-        registry.AddSubscription("conn-1", "match-1");
-        registry.AddSubscription("conn-1", "match-2");
+        registry.AddSubscription("conn-1", "match-1", "token-1");
+        registry.AddSubscription("conn-1", "match-2", "token-2");
 
         var removedMatches = registry.RemoveConnection("conn-1");
 
         Assert.Equal(2, removedMatches.Count);
-        Assert.Contains("match-1", removedMatches);
-        Assert.Contains("match-2", removedMatches);
+        Assert.Contains(removedMatches, subscription => subscription.MatchId == "match-1" && subscription.PlayerToken == "token-1");
+        Assert.Contains(removedMatches, subscription => subscription.MatchId == "match-2" && subscription.PlayerToken == "token-2");
         Assert.False(registry.IsSubscribed("conn-1", "match-1"));
         Assert.False(registry.IsSubscribed("conn-1", "match-2"));
     }

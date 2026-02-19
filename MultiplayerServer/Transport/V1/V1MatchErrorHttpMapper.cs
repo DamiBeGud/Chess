@@ -32,9 +32,16 @@ public sealed class V1MatchErrorHttpMapper : IMatchErrorHttpMapper
                 TypedResults.Json(
                     new ApiErrorResponse(failure.Code, failure.Message),
                     statusCode: StatusCodes.Status403Forbidden),
+            MatchErrorCodes.UnauthorizedResume =>
+                TypedResults.Json(
+                    new ApiErrorResponse(failure.Code, failure.Message),
+                    statusCode: StatusCodes.Status403Forbidden),
             MatchErrorCodes.MatchNotReady or
             MatchErrorCodes.OutOfTurn or
-            MatchErrorCodes.IllegalMove =>
+            MatchErrorCodes.IllegalMove or
+            MatchErrorCodes.SeatNotReconnectable or
+            MatchErrorCodes.GraceExpired or
+            MatchErrorCodes.MatchAlreadyEnded =>
                 TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
             MatchErrorCodes.InvalidPromotion =>
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),

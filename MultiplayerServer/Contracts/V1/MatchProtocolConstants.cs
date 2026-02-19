@@ -10,6 +10,8 @@ public static class MatchProtocolConstants
     public const string EventMatchSnapshot = "match.snapshot";
     public const string EventMatchUpdated = "match.updated";
     public const string EventMatchError = "match.error";
+    public const string EventMatchPresenceChanged = "match.presenceChanged";
+    public const string EventMatchEnded = "match.ended";
 
     public const string ErrorJoinCodeRequired = "join_code_required";
     public const string ErrorMatchIdRequired = "match_id_required";
@@ -24,8 +26,18 @@ public static class MatchProtocolConstants
     public const string ErrorInvalidPromotion = "invalid_promotion";
     public const string ErrorOutOfTurn = "out_of_turn";
     public const string ErrorIllegalMove = "illegal_move";
+    public const string ErrorGraceExpired = "grace_expired";
+    public const string ErrorUnauthorizedResume = "unauthorized_resume";
+    public const string ErrorSeatNotReconnectable = "seat_not_reconnectable";
+    public const string ErrorMatchAlreadyEnded = "match_already_ended";
 
     // MS-004 transport-specific validation/authorization codes.
     public const string ErrorTransportForbidden = "transport_forbidden";
     public const string ErrorTransportNotSubscribed = "transport_not_subscribed";
+
+    // MS-005 match lifecycle state values.
+    public const string MatchStatusInProgress = "in_progress";
+    public const string MatchStatusEnded = "ended";
+    public const string MatchResolutionForfeit = "forfeit";
+    public const string MatchResolutionDraw = "draw";
 }

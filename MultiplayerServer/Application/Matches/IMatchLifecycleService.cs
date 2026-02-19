@@ -20,7 +20,23 @@ public interface IGetMatchSnapshotUseCase
     GetMatchSnapshotOutcome GetMatchSnapshot(string? matchId, string? playerToken);
 }
 
-public interface IMatchLifecycleService : ICreateMatchUseCase, IJoinMatchUseCase, ISubmitMoveUseCase, IGetMatchSnapshotUseCase;
+public interface IReconnectMatchUseCase
+{
+    ReconnectMatchOutcome ReconnectMatch(string? matchId, string? playerToken);
+}
+
+public interface IDisconnectMatchUseCase
+{
+    DisconnectMatchOutcome DisconnectMatch(string? matchId, string? playerToken);
+}
+
+public interface IMatchLifecycleService :
+    ICreateMatchUseCase,
+    IJoinMatchUseCase,
+    ISubmitMoveUseCase,
+    IGetMatchSnapshotUseCase,
+    IReconnectMatchUseCase,
+    IDisconnectMatchUseCase;
 
 public sealed record CreateMatchResult(
     string MatchId,
@@ -50,7 +66,55 @@ public sealed record MatchSnapshot(
     string MatchId,
     string SideToMove,
     int MoveNumber,
-    IReadOnlyList<string> Board);
+    IReadOnlyList<string> Board,
+    string Status,
+    string? Resolution,
+    string? WinnerSeat,
+    MatchPresenceSnapshot Presence)
+{
+    public MatchSnapshot(
+        string MatchId,
+        string SideToMove,
+        int MoveNumber,
+        IReadOnlyList<string> Board)
+        : this(
+            MatchId,
+            SideToMove,
+            MoveNumber,
+            Board,
+            MatchStatuses.InProgress,
+            null,
+            null,
+            MatchPresenceSnapshot.Empty)
+    {
+    }
+}
+
+public sealed record MatchPresenceSnapshot(
+    MatchSeatPresenceSnapshot Creator,
+    MatchSeatPresenceSnapshot Joiner)
+{
+    public static readonly MatchPresenceSnapshot Empty = new(
+        new MatchSeatPresenceSnapshot(
+            MatchSeats.Creator,
+            false,
+            true,
+            null,
+            null),
+        new MatchSeatPresenceSnapshot(
+            MatchSeats.Joiner,
+            false,
+            false,
+            null,
+            null));
+}
+
+public sealed record MatchSeatPresenceSnapshot(
+    string Seat,
+    bool IsConnected,
+    bool IsReserved,
+    DateTimeOffset? DisconnectedUtc,
+    DateTimeOffset? GraceExpiresUtc);
 
 public abstract record GetMatchSnapshotOutcome;
 
@@ -66,10 +130,49 @@ public sealed record SubmitMoveFailed(SubmitMoveFailure Error) : SubmitMoveOutco
 
 public sealed record SubmitMoveFailure(string Code, string Message);
 
+public abstract record ReconnectMatchOutcome;
+
+public sealed record ReconnectMatchSucceeded(ReconnectMatchSuccess Response) : ReconnectMatchOutcome;
+
+public sealed record ReconnectMatchSuccess(
+    MatchSnapshot Snapshot,
+    string Seat,
+    bool PresenceChanged);
+
+public sealed record ReconnectMatchFailed(ReconnectMatchFailure Error) : ReconnectMatchOutcome;
+
+public sealed record ReconnectMatchFailure(string Code, string Message);
+
+public abstract record DisconnectMatchOutcome;
+
+public sealed record DisconnectMatchSucceeded(DisconnectMatchSuccess Response) : DisconnectMatchOutcome;
+
+public sealed record DisconnectMatchSuccess(
+    MatchSnapshot Snapshot,
+    string Seat,
+    bool PresenceChanged,
+    DateTimeOffset? GraceExpiresUtc);
+
+public sealed record DisconnectMatchFailed(DisconnectMatchFailure Error) : DisconnectMatchOutcome;
+
+public sealed record DisconnectMatchFailure(string Code, string Message);
+
 public static class MatchSeats
 {
     public const string Creator = "White";
     public const string Joiner = "Black";
+}
+
+public static class MatchStatuses
+{
+    public const string InProgress = "in_progress";
+    public const string Ended = "ended";
+}
+
+public static class MatchResolutions
+{
+    public const string Forfeit = "forfeit";
+    public const string Draw = "draw";
 }
 
 public static class MatchErrorCodes
@@ -87,4 +190,8 @@ public static class MatchErrorCodes
     public const string InvalidPromotion = "invalid_promotion";
     public const string OutOfTurn = "out_of_turn";
     public const string IllegalMove = "illegal_move";
+    public const string GraceExpired = "grace_expired";
+    public const string UnauthorizedResume = "unauthorized_resume";
+    public const string SeatNotReconnectable = "seat_not_reconnectable";
+    public const string MatchAlreadyEnded = "match_already_ended";
 }

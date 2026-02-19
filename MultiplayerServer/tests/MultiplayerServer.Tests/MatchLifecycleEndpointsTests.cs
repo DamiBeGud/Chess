@@ -406,6 +406,19 @@ public sealed class MatchLifecycleEndpointsTests
             CancellationToken cancellationToken)
             => Task.CompletedTask;
 
+        public Task PublishMatchPresenceChangedAsync(
+            MatchSnapshot snapshot,
+            string seat,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMatchEndedAsync(
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task PublishTransportErrorToConnectionAsync(
             string connectionId,
             string matchId,
@@ -458,6 +471,19 @@ public sealed class MatchLifecycleEndpointsTests
             CancellationToken cancellationToken)
             => Task.CompletedTask;
 
+        public Task PublishMatchPresenceChangedAsync(
+            MatchSnapshot snapshot,
+            string seat,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMatchEndedAsync(
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task PublishTransportErrorToConnectionAsync(
             string connectionId,
             string matchId,
@@ -480,6 +506,19 @@ public sealed class MatchLifecycleEndpointsTests
 
         public Task PublishMatchSnapshotToConnectionAsync(
             string connectionId,
+            MatchSnapshot snapshot,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMatchPresenceChangedAsync(
+            MatchSnapshot snapshot,
+            string seat,
+            string eventId,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
+        public Task PublishMatchEndedAsync(
             MatchSnapshot snapshot,
             string eventId,
             CancellationToken cancellationToken)

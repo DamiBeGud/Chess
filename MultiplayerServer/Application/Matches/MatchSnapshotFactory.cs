@@ -20,6 +20,22 @@ public sealed class MatchSnapshotFactory : IMatchSnapshotFactory
             matchState.MatchId,
             matchState.SideToMove,
             matchState.MoveNumber,
-            boardRows);
+            boardRows,
+            matchState.Status,
+            matchState.Resolution,
+            matchState.WinnerSeat,
+            new MatchPresenceSnapshot(
+                new MatchSeatPresenceSnapshot(
+                    MatchSeats.Creator,
+                    matchState.CreatorConnected,
+                    true,
+                    matchState.CreatorDisconnectedUtc,
+                    matchState.CreatorGraceExpiresUtc),
+                new MatchSeatPresenceSnapshot(
+                    MatchSeats.Joiner,
+                    matchState.JoinerToken is not null && matchState.JoinerConnected,
+                    matchState.JoinerToken is not null,
+                    matchState.JoinerDisconnectedUtc,
+                    matchState.JoinerGraceExpiresUtc)));
     }
 }

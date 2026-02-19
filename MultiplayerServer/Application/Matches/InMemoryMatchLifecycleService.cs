@@ -1,9 +1,10 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 
 namespace MultiplayerServer.Application.Matches;
 
-public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
+public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService, IDisposable
 {
     private readonly IMatchRepository _repository;
     private readonly IMatchIdGenerator _matchIdGenerator;
@@ -11,6 +12,10 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
     private readonly IPlayerTokenGenerator _playerTokenGenerator;
     private readonly IChessRulesEngine _rulesEngine;
     private readonly IMatchSnapshotFactory _snapshotFactory;
+    private readonly IMatchClock _clock;
+    private readonly IDisconnectGraceScheduler _disconnectGraceScheduler;
+    private readonly IMatchLifecycleEventPublisher _lifecycleEventPublisher;
+    private readonly MatchDisconnectPolicyOptions _disconnectPolicy;
     private readonly ILogger<InMemoryMatchLifecycleService> _logger;
 
     public InMemoryMatchLifecycleService()
@@ -21,6 +26,12 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
             new RandomPlayerTokenGenerator(),
             new ClassicChessRulesEngine(),
             new MatchSnapshotFactory(),
+            Options.Create(new MatchDisconnectPolicyOptions()),
+            new SystemMatchClock(),
+            new InMemoryDisconnectGraceScheduler(
+                new SystemMatchClock(),
+                NullLogger<InMemoryDisconnectGraceScheduler>.Instance),
+            new NullMatchLifecycleEventPublisher(),
             null)
     {
     }
@@ -32,6 +43,10 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
         IPlayerTokenGenerator playerTokenGenerator,
         IChessRulesEngine rulesEngine,
         IMatchSnapshotFactory snapshotFactory,
+        IOptions<MatchDisconnectPolicyOptions>? disconnectPolicyOptions = null,
+        IMatchClock? clock = null,
+        IDisconnectGraceScheduler? disconnectGraceScheduler = null,
+        IMatchLifecycleEventPublisher? lifecycleEventPublisher = null,
         ILogger<InMemoryMatchLifecycleService>? logger = null)
     {
         _repository = repository;
@@ -40,7 +55,20 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
         _playerTokenGenerator = playerTokenGenerator;
         _rulesEngine = rulesEngine;
         _snapshotFactory = snapshotFactory;
+        _disconnectPolicy = disconnectPolicyOptions?.Value ?? new MatchDisconnectPolicyOptions();
+        _clock = clock ?? new SystemMatchClock();
+        _disconnectGraceScheduler = disconnectGraceScheduler ?? new InMemoryDisconnectGraceScheduler(
+            _clock,
+            NullLogger<InMemoryDisconnectGraceScheduler>.Instance);
+        _lifecycleEventPublisher = lifecycleEventPublisher ?? new NullMatchLifecycleEventPublisher();
         _logger = logger ?? NullLogger<InMemoryMatchLifecycleService>.Instance;
+
+        if (_disconnectPolicy.DisconnectGracePeriodSeconds < 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(disconnectPolicyOptions),
+                "DisconnectGracePeriodSeconds must be at least 1 second.");
+        }
     }
 
     public CreateMatchResult CreateMatch()
@@ -62,7 +90,17 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                 WhiteCanCastleQueenSide = true,
                 BlackCanCastleKingSide = true,
                 BlackCanCastleQueenSide = true,
-                EnPassantTarget = null
+                EnPassantTarget = null,
+                CreatorConnected = true,
+                JoinerConnected = false,
+                CreatorDisconnectedUtc = null,
+                JoinerDisconnectedUtc = null,
+                CreatorGraceExpiresUtc = null,
+                JoinerGraceExpiresUtc = null,
+                Status = MatchStatuses.InProgress,
+                Resolution = null,
+                WinnerSeat = null,
+                EndedUtc = null
             });
 
         _logger.LogInformation("Match created {MatchId}", matchId);
@@ -97,8 +135,20 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     return new JoinMatchFailed(new JoinMatchFailure(MatchErrorCodes.MatchFull, "Match already has two players."));
                 }
 
+                if (string.Equals(match.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+                {
+                    return new JoinMatchFailed(
+                        new JoinMatchFailure(
+                            MatchErrorCodes.MatchAlreadyEnded,
+                            "Match has already ended."));
+                }
+
                 var joinerToken = _playerTokenGenerator.Generate();
                 match.JoinerToken = joinerToken;
+                match.JoinerConnected = true;
+                match.JoinerDisconnectedUtc = null;
+                match.JoinerGraceExpiresUtc = null;
+
                 _logger.LogInformation(
                     "Join accepted for {MatchId}; assigned {Seat}",
                     match.MatchId,
@@ -203,6 +253,14 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                     return new SubmitMoveFailed(new SubmitMoveFailure(MatchErrorCodes.MatchNotFound, "Match was not found."));
                 }
 
+                if (string.Equals(match.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+                {
+                    return new SubmitMoveFailed(
+                        new SubmitMoveFailure(
+                            MatchErrorCodes.MatchAlreadyEnded,
+                            "Match has already ended."));
+                }
+
                 if (match.JoinerToken is null)
                 {
                     _logger.LogWarning(
@@ -226,6 +284,32 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
                         new SubmitMoveFailure(
                             MatchErrorCodes.InvalidPlayerToken,
                             "playerToken is not valid for this match."));
+                }
+
+                if (!IsSeatConnected(match, seat))
+                {
+                    return new SubmitMoveFailed(
+                        new SubmitMoveFailure(
+                            MatchErrorCodes.SeatNotReconnectable,
+                            "Reconnect the seat before submitting a move."));
+                }
+
+                if (!AreBothJoinedSeatsConnected(match))
+                {
+                    return new SubmitMoveFailed(
+                        new SubmitMoveFailure(
+                            MatchErrorCodes.SeatNotReconnectable,
+                            "Match is paused while a player is disconnected."));
+                }
+
+                if (_disconnectPolicy.RequireBothPlayersConnectedToStart &&
+                    match.MoveNumber == 1 &&
+                    (!match.CreatorConnected || !match.JoinerConnected))
+                {
+                    return new SubmitMoveFailed(
+                        new SubmitMoveFailure(
+                            MatchErrorCodes.MatchNotReady,
+                            "Both players must be connected before the first move."));
                 }
 
                 if (!string.Equals(match.SideToMove, seat, StringComparison.Ordinal))
@@ -295,6 +379,343 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
             });
     }
 
+    public ReconnectMatchOutcome ReconnectMatch(string? matchId, string? playerToken)
+    {
+        if (string.IsNullOrWhiteSpace(matchId))
+        {
+            return new ReconnectMatchFailed(
+                new ReconnectMatchFailure(
+                    MatchErrorCodes.MatchIdRequired,
+                    "matchId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(playerToken))
+        {
+            return new ReconnectMatchFailed(
+                new ReconnectMatchFailure(
+                    MatchErrorCodes.PlayerTokenRequired,
+                    "playerToken is required."));
+        }
+
+        var normalizedMatchId = matchId.Trim();
+        var normalizedPlayerToken = playerToken.Trim();
+        MatchSnapshot? endedSnapshot = null;
+
+        var outcome = _repository.WithMatchById<ReconnectMatchOutcome>(
+            normalizedMatchId,
+            match =>
+            {
+                if (match is null)
+                {
+                    return new ReconnectMatchFailed(
+                        new ReconnectMatchFailure(
+                            MatchErrorCodes.MatchNotFound,
+                            "Match was not found."));
+                }
+
+                if (string.Equals(match.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+                {
+                    return new ReconnectMatchFailed(
+                        new ReconnectMatchFailure(
+                            MatchErrorCodes.MatchAlreadyEnded,
+                            "Match has already ended."));
+                }
+
+                var seat = ResolveSeat(match, normalizedPlayerToken);
+                if (seat is null)
+                {
+                    return new ReconnectMatchFailed(
+                        new ReconnectMatchFailure(
+                            MatchErrorCodes.UnauthorizedResume,
+                            "Seat cannot be resumed with this token."));
+                }
+
+                if (IsSeatConnected(match, seat))
+                {
+                    return new ReconnectMatchSucceeded(
+                        new ReconnectMatchSuccess(
+                            _snapshotFactory.Create(match),
+                            seat,
+                            false));
+                }
+
+                var graceExpiresUtc = GetSeatGraceExpiresUtc(match, seat);
+                if (graceExpiresUtc is null)
+                {
+                    return new ReconnectMatchFailed(
+                        new ReconnectMatchFailure(
+                            MatchErrorCodes.SeatNotReconnectable,
+                            "Seat is not reconnectable."));
+                }
+
+                var now = _clock.UtcNow;
+                if (now >= graceExpiresUtc.Value)
+                {
+                    ResolveDisconnectedSeatAbandonment(match, seat, now);
+                    endedSnapshot = _snapshotFactory.Create(match);
+                    return new ReconnectMatchFailed(
+                        new ReconnectMatchFailure(
+                            MatchErrorCodes.GraceExpired,
+                            "Reconnect grace period has expired."));
+                }
+
+                MarkSeatConnected(match, seat);
+                return new ReconnectMatchSucceeded(
+                    new ReconnectMatchSuccess(
+                        _snapshotFactory.Create(match),
+                        seat,
+                        true));
+            });
+
+        if (outcome is ReconnectMatchSucceeded { Response: { PresenceChanged: true, Seat: var seat } })
+        {
+            _disconnectGraceScheduler.CancelSeatGraceTimeout(normalizedMatchId, seat);
+        }
+
+        if (endedSnapshot is not null)
+        {
+            _disconnectGraceScheduler.CancelMatchGraceTimeouts(normalizedMatchId);
+            _ = PublishMatchEndedAsync(endedSnapshot, CancellationToken.None);
+        }
+
+        return outcome;
+    }
+
+    public DisconnectMatchOutcome DisconnectMatch(string? matchId, string? playerToken)
+    {
+        if (string.IsNullOrWhiteSpace(matchId))
+        {
+            return new DisconnectMatchFailed(
+                new DisconnectMatchFailure(
+                    MatchErrorCodes.MatchIdRequired,
+                    "matchId is required."));
+        }
+
+        if (string.IsNullOrWhiteSpace(playerToken))
+        {
+            return new DisconnectMatchFailed(
+                new DisconnectMatchFailure(
+                    MatchErrorCodes.PlayerTokenRequired,
+                    "playerToken is required."));
+        }
+
+        var normalizedMatchId = matchId.Trim();
+        var normalizedPlayerToken = playerToken.Trim();
+
+        var outcome = _repository.WithMatchById<DisconnectMatchOutcome>(
+            normalizedMatchId,
+            match =>
+            {
+                if (match is null)
+                {
+                    return new DisconnectMatchFailed(
+                        new DisconnectMatchFailure(
+                            MatchErrorCodes.MatchNotFound,
+                            "Match was not found."));
+                }
+
+                if (string.Equals(match.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+                {
+                    return new DisconnectMatchFailed(
+                        new DisconnectMatchFailure(
+                            MatchErrorCodes.MatchAlreadyEnded,
+                            "Match has already ended."));
+                }
+
+                var seat = ResolveSeat(match, normalizedPlayerToken);
+                if (seat is null)
+                {
+                    return new DisconnectMatchFailed(
+                        new DisconnectMatchFailure(
+                            MatchErrorCodes.UnauthorizedResume,
+                            "Seat cannot be disconnected with this token."));
+                }
+
+                if (!IsSeatConnected(match, seat))
+                {
+                    return new DisconnectMatchSucceeded(
+                        new DisconnectMatchSuccess(
+                            _snapshotFactory.Create(match),
+                            seat,
+                            false,
+                            GetSeatGraceExpiresUtc(match, seat)));
+                }
+
+                var disconnectedUtc = _clock.UtcNow;
+                var graceExpiresUtc = disconnectedUtc.AddSeconds(_disconnectPolicy.DisconnectGracePeriodSeconds);
+                MarkSeatDisconnected(match, seat, disconnectedUtc, graceExpiresUtc);
+
+                return new DisconnectMatchSucceeded(
+                    new DisconnectMatchSuccess(
+                        _snapshotFactory.Create(match),
+                        seat,
+                        true,
+                        graceExpiresUtc));
+            });
+
+        if (outcome is DisconnectMatchSucceeded
+            {
+                Response:
+                {
+                    PresenceChanged: true,
+                    GraceExpiresUtc: { } graceExpiresUtc,
+                    Seat: var seat
+                }
+            })
+        {
+            _disconnectGraceScheduler.ScheduleSeatGraceTimeout(
+                normalizedMatchId,
+                seat,
+                graceExpiresUtc,
+                cancellationToken => HandleSeatGraceTimeoutAsync(normalizedMatchId, seat, cancellationToken));
+        }
+
+        return outcome;
+    }
+
+    public void Dispose()
+    {
+        _disconnectGraceScheduler.Dispose();
+    }
+
+    private async Task HandleSeatGraceTimeoutAsync(string matchId, string seat, CancellationToken cancellationToken)
+    {
+        var now = _clock.UtcNow;
+        MatchSnapshot? endedSnapshot = null;
+        DateTimeOffset? retryDueUtc = null;
+
+        var resolved = _repository.WithMatchById(
+            matchId,
+            match =>
+            {
+                if (match is null || string.Equals(match.Status, MatchStatuses.Ended, StringComparison.Ordinal))
+                {
+                    return false;
+                }
+
+                if (IsSeatConnected(match, seat))
+                {
+                    return false;
+                }
+
+                var graceExpiresUtc = GetSeatGraceExpiresUtc(match, seat);
+                if (graceExpiresUtc is null)
+                {
+                    return false;
+                }
+
+                if (now < graceExpiresUtc.Value)
+                {
+                    retryDueUtc = graceExpiresUtc;
+                    return false;
+                }
+
+                ResolveDisconnectedSeatAbandonment(match, seat, now);
+                endedSnapshot = _snapshotFactory.Create(match);
+                return true;
+            });
+
+        if (!resolved || endedSnapshot is null)
+        {
+            if (retryDueUtc.HasValue)
+            {
+                _disconnectGraceScheduler.ScheduleSeatGraceTimeout(
+                    matchId,
+                    seat,
+                    retryDueUtc.Value,
+                    token => HandleSeatGraceTimeoutAsync(matchId, seat, token));
+            }
+
+            return;
+        }
+
+        _disconnectGraceScheduler.CancelMatchGraceTimeouts(matchId);
+        await PublishMatchEndedAsync(endedSnapshot, cancellationToken);
+    }
+
+    private async Task PublishMatchEndedAsync(MatchSnapshot snapshot, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _lifecycleEventPublisher.PublishMatchEndedAsync(snapshot, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            _logger.LogError(exception, "Failed to publish match-ended event for {MatchId}", snapshot.MatchId);
+        }
+    }
+
+    private void ResolveDisconnectedSeatAbandonment(MatchState match, string disconnectedSeat, DateTimeOffset endedUtc)
+    {
+        match.Status = MatchStatuses.Ended;
+        match.EndedUtc = endedUtc;
+
+        if (_disconnectPolicy.AbandonmentResolution == MatchAbandonmentResolutionMode.Draw)
+        {
+            match.Resolution = MatchResolutions.Draw;
+            match.WinnerSeat = null;
+            return;
+        }
+
+        match.Resolution = MatchResolutions.Forfeit;
+        match.WinnerSeat = disconnectedSeat == MatchSeats.Creator
+            ? MatchSeats.Joiner
+            : MatchSeats.Creator;
+    }
+
+    private static bool IsSeatConnected(MatchState match, string seat)
+    {
+        return seat == MatchSeats.Creator
+            ? match.CreatorConnected
+            : match.JoinerToken is not null && match.JoinerConnected;
+    }
+
+    private static DateTimeOffset? GetSeatGraceExpiresUtc(MatchState match, string seat)
+    {
+        return seat == MatchSeats.Creator
+            ? match.CreatorGraceExpiresUtc
+            : match.JoinerGraceExpiresUtc;
+    }
+
+    private static void MarkSeatConnected(MatchState match, string seat)
+    {
+        if (seat == MatchSeats.Creator)
+        {
+            match.CreatorConnected = true;
+            match.CreatorDisconnectedUtc = null;
+            match.CreatorGraceExpiresUtc = null;
+            return;
+        }
+
+        match.JoinerConnected = true;
+        match.JoinerDisconnectedUtc = null;
+        match.JoinerGraceExpiresUtc = null;
+    }
+
+    private static void MarkSeatDisconnected(
+        MatchState match,
+        string seat,
+        DateTimeOffset disconnectedUtc,
+        DateTimeOffset graceExpiresUtc)
+    {
+        if (seat == MatchSeats.Creator)
+        {
+            match.CreatorConnected = false;
+            match.CreatorDisconnectedUtc = disconnectedUtc;
+            match.CreatorGraceExpiresUtc = graceExpiresUtc;
+            return;
+        }
+
+        match.JoinerConnected = false;
+        match.JoinerDisconnectedUtc = disconnectedUtc;
+        match.JoinerGraceExpiresUtc = graceExpiresUtc;
+    }
+
+    private static bool AreBothJoinedSeatsConnected(MatchState match)
+    {
+        return match.CreatorConnected && (match.JoinerToken is null || match.JoinerConnected);
+    }
+
     private string GenerateUniqueJoinCode()
     {
         while (true)
@@ -327,17 +748,18 @@ public sealed class InMemoryMatchLifecycleService : IMatchLifecycleService
 
     private static char[] CreateInitialBoard()
     {
-        var boardRows = new[]
-        {
-            "rnbqkbnr",
-            "pppppppp",
-            "........",
-            "........",
-            "........",
-            "........",
-            "PPPPPPPP",
-            "RNBQKBNR"
-        };
+        var boardRows =
+            new[]
+            {
+                "rnbqkbnr",
+                "pppppppp",
+                "........",
+                "........",
+                "........",
+                "........",
+                "PPPPPPPP",
+                "RNBQKBNR"
+            };
 
         var board = new char[64];
         for (var row = 0; row < 8; row++)

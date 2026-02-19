@@ -10,6 +10,8 @@ namespace MultiplayerServer.Hubs.V1;
 public sealed class MatchHub : Hub
 {
     private readonly IGetMatchSnapshotUseCase _snapshotUseCase;
+    private readonly IReconnectMatchUseCase _reconnectUseCase;
+    private readonly IDisconnectMatchUseCase _disconnectUseCase;
     private readonly IMatchConnectionRegistry _connectionRegistry;
     private readonly IMatchSyncDispatchGate _dispatchGate;
     private readonly IMatchSyncPublisher _syncPublisher;
@@ -18,6 +20,8 @@ public sealed class MatchHub : Hub
 
     public MatchHub(
         IGetMatchSnapshotUseCase snapshotUseCase,
+        IReconnectMatchUseCase reconnectUseCase,
+        IDisconnectMatchUseCase disconnectUseCase,
         IMatchConnectionRegistry connectionRegistry,
         IMatchSyncDispatchGate dispatchGate,
         IMatchSyncPublisher syncPublisher,
@@ -25,6 +29,8 @@ public sealed class MatchHub : Hub
         ILogger<MatchHub> logger)
     {
         _snapshotUseCase = snapshotUseCase;
+        _reconnectUseCase = reconnectUseCase;
+        _disconnectUseCase = disconnectUseCase;
         _connectionRegistry = connectionRegistry;
         _dispatchGate = dispatchGate;
         _syncPublisher = syncPublisher;
@@ -39,34 +45,44 @@ public sealed class MatchHub : Hub
         await EnsureConnectionTokenMatchesRequestedTokenAsync(normalizedPlayerToken, normalizedMatchId);
 
         await using var dispatchLease = await _dispatchGate.AcquireAsync(normalizedMatchId, Context.ConnectionAborted);
-        var snapshotOutcome = _snapshotUseCase.GetMatchSnapshot(normalizedMatchId, normalizedPlayerToken);
-        switch (snapshotOutcome)
+        var reconnectOutcome = _reconnectUseCase.ReconnectMatch(normalizedMatchId, normalizedPlayerToken);
+        switch (reconnectOutcome)
         {
-            case GetMatchSnapshotSucceeded { Response: { Snapshot: { } snapshot } }:
+            case ReconnectMatchSucceeded { Response: { Snapshot: { } snapshot } response }:
                 await Groups.AddToGroupAsync(
                     Context.ConnectionId,
                     MatchHubGroupNames.ForMatch(normalizedMatchId),
                     Context.ConnectionAborted);
-                _connectionRegistry.AddSubscription(Context.ConnectionId, normalizedMatchId);
+                _connectionRegistry.AddSubscription(Context.ConnectionId, normalizedMatchId, normalizedPlayerToken);
                 await _syncPublisher.PublishMatchSnapshotToConnectionAsync(
                     Context.ConnectionId,
                     snapshot,
                     _eventIdGenerator.Generate(),
                     Context.ConnectionAborted);
+
+                if (response.PresenceChanged)
+                {
+                    await _syncPublisher.PublishMatchPresenceChangedAsync(
+                        snapshot,
+                        response.Seat,
+                        _eventIdGenerator.Generate(),
+                        Context.ConnectionAborted);
+                }
+
                 _logger.LogInformation(
                     "Connection {ConnectionId} subscribed to realtime match {MatchId}",
                     Context.ConnectionId,
                     normalizedMatchId);
                 return;
-            case GetMatchSnapshotSucceeded:
-                throw new InvalidOperationException("Snapshot success outcome must include a snapshot payload.");
-            case GetMatchSnapshotFailed { Error: { } error }:
+            case ReconnectMatchSucceeded:
+                throw new InvalidOperationException("Reconnect success outcome must include a snapshot payload.");
+            case ReconnectMatchFailed { Error: { } error }:
                 await PublishTransportErrorAsync(normalizedMatchId, error.Code, error.Message);
                 throw new HubException(BuildHubExceptionMessage(error.Code, error.Message));
-            case GetMatchSnapshotFailed:
-                throw new InvalidOperationException("Snapshot failure outcome must include an error payload.");
+            case ReconnectMatchFailed:
+                throw new InvalidOperationException("Reconnect failure outcome must include an error payload.");
             default:
-                throw new InvalidOperationException($"Unsupported snapshot outcome type: {snapshotOutcome.GetType().Name}");
+                throw new InvalidOperationException($"Unsupported reconnect outcome type: {reconnectOutcome.GetType().Name}");
         }
     }
 
@@ -74,7 +90,9 @@ public sealed class MatchHub : Hub
     {
         var normalizedMatchId = NormalizeRequiredMatchId(matchId);
         await using var dispatchLease = await _dispatchGate.AcquireAsync(normalizedMatchId, Context.ConnectionAborted);
-        if (!_connectionRegistry.RemoveSubscription(Context.ConnectionId, normalizedMatchId))
+
+        var removed = _connectionRegistry.RemoveSubscription(Context.ConnectionId, normalizedMatchId);
+        if (removed is null)
         {
             await PublishTransportErrorAsync(
                 normalizedMatchId,
@@ -90,6 +108,7 @@ public sealed class MatchHub : Hub
             Context.ConnectionId,
             MatchHubGroupNames.ForMatch(normalizedMatchId),
             Context.ConnectionAborted);
+
         _logger.LogInformation(
             "Connection {ConnectionId} unsubscribed from realtime match {MatchId}",
             Context.ConnectionId,
@@ -143,13 +162,17 @@ public sealed class MatchHub : Hub
 
     public override async Task OnDisconnectedAsync(Exception? exception)
     {
-        var matchIds = _connectionRegistry.RemoveConnection(Context.ConnectionId);
-        foreach (var matchId in matchIds)
+        var subscriptions = _connectionRegistry.RemoveConnection(Context.ConnectionId);
+        foreach (var subscription in subscriptions)
         {
             await Groups.RemoveFromGroupAsync(
                 Context.ConnectionId,
-                MatchHubGroupNames.ForMatch(matchId),
+                MatchHubGroupNames.ForMatch(subscription.MatchId),
                 CancellationToken.None);
+
+            await using var dispatchLease = await _dispatchGate.AcquireAsync(subscription.MatchId, CancellationToken.None);
+            var disconnectOutcome = _disconnectUseCase.DisconnectMatch(subscription.MatchId, subscription.PlayerToken);
+            await PublishPresenceChangeIfNeededAsync(disconnectOutcome, CancellationToken.None);
         }
 
         if (exception is not null)
@@ -167,6 +190,27 @@ public sealed class MatchHub : Hub
         }
 
         await base.OnDisconnectedAsync(exception);
+    }
+
+    private async Task PublishPresenceChangeIfNeededAsync(DisconnectMatchOutcome outcome, CancellationToken cancellationToken)
+    {
+        switch (outcome)
+        {
+            case DisconnectMatchSucceeded { Response: { PresenceChanged: true, Snapshot: { } snapshot, Seat: { } seat } }:
+                await _syncPublisher.PublishMatchPresenceChangedAsync(
+                    snapshot,
+                    seat,
+                    _eventIdGenerator.Generate(),
+                    cancellationToken);
+                return;
+            case DisconnectMatchFailed { Error: { } error }:
+                _logger.LogInformation(
+                    "Disconnect registration did not change presence: {Code}",
+                    error.Code);
+                return;
+            default:
+                return;
+        }
     }
 
     private async Task PublishTransportErrorAsync(string matchId, string code, string message)
@@ -232,11 +276,11 @@ public sealed class MatchHub : Hub
         {
             await PublishTransportErrorAsync(
                 matchId,
-                MatchProtocolConstants.ErrorTransportForbidden,
+                MatchProtocolConstants.ErrorUnauthorizedResume,
                 "Connection token does not match requested playerToken.");
             throw new HubException(
                 BuildHubExceptionMessage(
-                    MatchProtocolConstants.ErrorTransportForbidden,
+                    MatchProtocolConstants.ErrorUnauthorizedResume,
                     $"Connection is not authorized for realtime match access to {matchId}."));
         }
     }
