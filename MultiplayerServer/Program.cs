@@ -1,12 +1,15 @@
 using System.Diagnostics;
+using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
 using MultiplayerServer.Hubs.V1;
+using MultiplayerServer.Transport.V1;
 
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<IMatchLifecycleService, InMemoryMatchLifecycleService>();
 
 var app = builder.Build();
 var logger = app.Logger;
@@ -68,6 +71,7 @@ app.MapGet(ServerRouteConventions.Health, () => Results.Ok(HealthResponse.OkNow(
 
 var apiV1 = app.MapGroup(ServerRouteConventions.ApiV1Prefix);
 apiV1.MapGet(ServerRouteConventions.ApiV1Root, () => Results.Ok(ApiInfoResponse.V1()));
+apiV1.MapMatchLifecycleEndpoints();
 
 app.MapHub<MatchHub>(ServerRouteConventions.MatchHubV1);
 
@@ -79,4 +83,8 @@ static int ResolveStatusCode(HttpContext context, bool requestFailed)
     return requestFailed && !context.Response.HasStarted && statusCode < StatusCodes.Status400BadRequest
         ? StatusCodes.Status500InternalServerError
         : statusCode;
+}
+
+public partial class Program
+{
 }

@@ -23,4 +23,14 @@ public sealed class ResponseContractsTests
         Assert.Equal("MultiplayerServer", response.Service);
         Assert.Equal("v1", response.Version);
     }
+
+    [Fact]
+    public void MatchProtocolConstants_UseExpectedSeatsAndErrorCodes()
+    {
+        Assert.Equal("White", MatchProtocolConstants.CreatorSeat);
+        Assert.Equal("Black", MatchProtocolConstants.JoinerSeat);
+        Assert.Equal("join_code_required", MatchProtocolConstants.ErrorJoinCodeRequired);
+        Assert.Equal("match_not_found", MatchProtocolConstants.ErrorMatchNotFound);
+        Assert.Equal("match_full", MatchProtocolConstants.ErrorMatchFull);
+    }
 }

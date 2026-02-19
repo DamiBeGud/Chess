@@ -9,6 +9,8 @@ public sealed class ServerRouteConventionsTests
     {
         Assert.StartsWith("/", ServerRouteConventions.Health);
         Assert.StartsWith("/api/v1", ServerRouteConventions.ApiV1Prefix);
+        Assert.StartsWith("/matches", ServerRouteConventions.ApiV1Matches);
+        Assert.StartsWith("/matches", ServerRouteConventions.ApiV1MatchesJoin);
         Assert.StartsWith("/hubs/v1", ServerRouteConventions.MatchHubV1);
     }
 
@@ -18,6 +20,8 @@ public sealed class ServerRouteConventionsTests
         Assert.Equal("/health", ServerRouteConventions.Health);
         Assert.Equal("/api/v1", ServerRouteConventions.ApiV1Prefix);
         Assert.Equal("/", ServerRouteConventions.ApiV1Root);
+        Assert.Equal("/matches", ServerRouteConventions.ApiV1Matches);
+        Assert.Equal("/matches/join", ServerRouteConventions.ApiV1MatchesJoin);
         Assert.Equal("/hubs/v1/matches", ServerRouteConventions.MatchHubV1);
     }
 }
