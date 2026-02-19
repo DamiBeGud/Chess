@@ -9,6 +9,12 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Logging.SetMinimumLevel(LogLevel.Information);
 
 builder.Services.AddSignalR();
+builder.Services.AddSingleton<IMatchRepository, InMemoryMatchRepository>();
+builder.Services.AddSingleton<IMatchIdGenerator, GuidMatchIdGenerator>();
+builder.Services.AddSingleton<IJoinCodeGenerator, RandomJoinCodeGenerator>();
+builder.Services.AddSingleton<IPlayerTokenGenerator, RandomPlayerTokenGenerator>();
+builder.Services.AddSingleton<IChessRulesEngine, ClassicChessRulesEngine>();
+builder.Services.AddSingleton<IMatchSnapshotFactory, MatchSnapshotFactory>();
 builder.Services.AddSingleton<InMemoryMatchLifecycleService>();
 builder.Services.AddSingleton<ICreateMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());
 builder.Services.AddSingleton<IJoinMatchUseCase>(sp => sp.GetRequiredService<InMemoryMatchLifecycleService>());

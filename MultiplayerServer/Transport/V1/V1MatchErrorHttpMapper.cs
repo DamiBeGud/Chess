@@ -11,11 +11,11 @@ public sealed class V1MatchErrorHttpMapper : IMatchErrorHttpMapper
     {
         return failure.Code switch
         {
-            MatchProtocolConstants.ErrorJoinCodeRequired =>
+            MatchErrorCodes.JoinCodeRequired =>
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorMatchNotFound =>
+            MatchErrorCodes.MatchNotFound =>
                 TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorMatchFull =>
+            MatchErrorCodes.MatchFull =>
                 TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
             _ =>
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
@@ -26,17 +26,17 @@ public sealed class V1MatchErrorHttpMapper : IMatchErrorHttpMapper
     {
         return failure.Code switch
         {
-            MatchProtocolConstants.ErrorMatchNotFound =>
+            MatchErrorCodes.MatchNotFound =>
                 TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorInvalidPlayerToken =>
+            MatchErrorCodes.InvalidPlayerToken =>
                 TypedResults.Json(
                     new ApiErrorResponse(failure.Code, failure.Message),
                     statusCode: StatusCodes.Status403Forbidden),
-            MatchProtocolConstants.ErrorMatchNotReady or
-            MatchProtocolConstants.ErrorOutOfTurn or
-            MatchProtocolConstants.ErrorIllegalMove =>
+            MatchErrorCodes.MatchNotReady or
+            MatchErrorCodes.OutOfTurn or
+            MatchErrorCodes.IllegalMove =>
                 TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
-            MatchProtocolConstants.ErrorInvalidPromotion =>
+            MatchErrorCodes.InvalidPromotion =>
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message)),
             _ =>
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
