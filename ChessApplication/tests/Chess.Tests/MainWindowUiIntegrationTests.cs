@@ -1105,7 +1105,7 @@ public sealed class MainWindowUiIntegrationTests
 
     private static string ToCoordinate(int file, int rank)
     {
-        return $"{(char)('a' + file)}{rank}";
+        return BoardGeometry.ToCoordinate(new Square(file, rank - 1));
     }
 
     private static IReadOnlyList<MoveHistoryEntryViewModel> GetMoveHistoryEntries(Window window)

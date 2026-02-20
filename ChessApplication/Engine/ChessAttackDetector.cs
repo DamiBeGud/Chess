@@ -5,29 +5,6 @@ namespace Chess.Engine;
 
 internal static class ChessAttackDetector
 {
-    private static readonly (int File, int Rank)[] KnightOffsets =
-    [
-        (-2, -1), (-2, 1), (-1, -2), (-1, 2),
-        (1, -2), (1, 2), (2, -1), (2, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] KingOffsets =
-    [
-        (-1, -1), (-1, 0), (-1, 1),
-        (0, -1),           (0, 1),
-        (1, -1),  (1, 0),  (1, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] BishopDirections =
-    [
-        (-1, -1), (-1, 1), (1, -1), (1, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] RookDirections =
-    [
-        (-1, 0), (1, 0), (0, -1), (0, 1)
-    ];
-
     internal static bool MoveLeavesKingInCheck(
         IReadOnlyDictionary<Square, Piece> board,
         Move move,
@@ -56,7 +33,7 @@ internal static class ChessAttackDetector
             return true;
         }
 
-        foreach (var (fileOffset, rankOffset) in KnightOffsets)
+        foreach (var (fileOffset, rankOffset) in BoardGeometry.KnightOffsets)
         {
             if (IsPieceAt(
                     board,
@@ -69,7 +46,7 @@ internal static class ChessAttackDetector
             }
         }
 
-        foreach (var (fileOffset, rankOffset) in KingOffsets)
+        foreach (var (fileOffset, rankOffset) in BoardGeometry.KingOffsets)
         {
             if (IsPieceAt(
                     board,
@@ -82,8 +59,8 @@ internal static class ChessAttackDetector
             }
         }
 
-        if (IsAttackedBySlidingPiece(board, targetSquare, attackerColor, BishopDirections, PieceType.Bishop)
-            || IsAttackedBySlidingPiece(board, targetSquare, attackerColor, RookDirections, PieceType.Rook))
+        if (IsAttackedBySlidingPiece(board, targetSquare, attackerColor, BoardGeometry.DiagonalDirections, PieceType.Bishop)
+            || IsAttackedBySlidingPiece(board, targetSquare, attackerColor, BoardGeometry.OrthogonalDirections, PieceType.Rook))
         {
             return true;
         }
@@ -95,7 +72,7 @@ internal static class ChessAttackDetector
         IReadOnlyDictionary<Square, Piece> board,
         Square targetSquare,
         PieceColor attackerColor,
-        (int File, int Rank)[] directions,
+        IReadOnlyList<(int File, int Rank)> directions,
         PieceType primaryPieceType)
     {
         foreach (var (fileStep, rankStep) in directions)

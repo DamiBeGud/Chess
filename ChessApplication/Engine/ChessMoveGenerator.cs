@@ -7,37 +7,6 @@ namespace Chess.Engine;
 
 internal sealed class ChessMoveGenerator
 {
-    private static readonly (int File, int Rank)[] KnightOffsets =
-    [
-        (-2, -1), (-2, 1), (-1, -2), (-1, 2),
-        (1, -2), (1, 2), (2, -1), (2, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] KingOffsets =
-    [
-        (-1, -1), (-1, 0), (-1, 1),
-        (0, -1),           (0, 1),
-        (1, -1),  (1, 0),  (1, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] BishopDirections =
-    [
-        (-1, -1), (-1, 1), (1, -1), (1, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] RookDirections =
-    [
-        (-1, 0), (1, 0), (0, -1), (0, 1)
-    ];
-
-    private static readonly (int File, int Rank)[] QueenDirections =
-    [
-        (-1, -1), (-1, 1), (1, -1), (1, 1),
-        (-1, 0), (1, 0), (0, -1), (0, 1)
-    ];
-
-    private static readonly int[] PawnCaptureFileOffsets = [-1, 1];
-
     private readonly Action<PieceColor, Square, Square?, bool, string, bool> _logCastlingDecision;
 
     internal ChessMoveGenerator(Action<PieceColor, Square, Square?, bool, string, bool> logCastlingDecision)
@@ -107,19 +76,19 @@ internal sealed class ChessMoveGenerator
                 AddPawnMoves(gameState, board, moves, fromSquare, piece);
                 break;
             case PieceType.Knight:
-                AddJumpingMoves(board, moves, fromSquare, piece, KnightOffsets);
+                AddJumpingMoves(board, moves, fromSquare, piece, BoardGeometry.KnightOffsets);
                 break;
             case PieceType.Bishop:
-                AddSlidingMoves(board, moves, fromSquare, piece, BishopDirections);
+                AddSlidingMoves(board, moves, fromSquare, piece, BoardGeometry.DiagonalDirections);
                 break;
             case PieceType.Rook:
-                AddSlidingMoves(board, moves, fromSquare, piece, RookDirections);
+                AddSlidingMoves(board, moves, fromSquare, piece, BoardGeometry.OrthogonalDirections);
                 break;
             case PieceType.Queen:
-                AddSlidingMoves(board, moves, fromSquare, piece, QueenDirections);
+                AddSlidingMoves(board, moves, fromSquare, piece, BoardGeometry.QueenDirections);
                 break;
             case PieceType.King:
-                AddJumpingMoves(board, moves, fromSquare, piece, KingOffsets);
+                AddJumpingMoves(board, moves, fromSquare, piece, BoardGeometry.KingOffsets);
                 AddCastlingMoves(gameState, board, moves, fromSquare, piece, logCastlingDecisions);
                 break;
             default:
@@ -159,7 +128,7 @@ internal sealed class ChessMoveGenerator
             }
         }
 
-        foreach (var fileOffset in PawnCaptureFileOffsets)
+        foreach (var fileOffset in BoardGeometry.PawnCaptureFileOffsets)
         {
             var targetFile = fromSquare.File + fileOffset;
             var targetRank = fromSquare.Rank + direction;
@@ -367,7 +336,7 @@ internal sealed class ChessMoveGenerator
         ICollection<Move> moves,
         Square fromSquare,
         Piece piece,
-        (int File, int Rank)[] offsets)
+        IReadOnlyList<(int File, int Rank)> offsets)
     {
         foreach (var (fileOffset, rankOffset) in offsets)
         {
@@ -389,7 +358,7 @@ internal sealed class ChessMoveGenerator
         ICollection<Move> moves,
         Square fromSquare,
         Piece piece,
-        (int File, int Rank)[] directions)
+        IReadOnlyList<(int File, int Rank)> directions)
     {
         foreach (var (fileStep, rankStep) in directions)
         {

@@ -18,7 +18,7 @@ internal sealed class MainWindowTextFormatter : IMainWindowTextFormatter
 
     public string ToCoordinate(Square square)
     {
-        return $"{(char)('a' + square.File)}{square.Rank + 1}";
+        return BoardGeometry.ToCoordinate(square);
     }
 
     public string BuildFocusedSquareText(Square square)

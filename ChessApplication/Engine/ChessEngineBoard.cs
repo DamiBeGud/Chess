@@ -51,6 +51,6 @@ internal static class ChessEngineBoard
 
     internal static bool IsWithinBoard(int file, int rank)
     {
-        return file is >= 0 and <= 7 && rank is >= 0 and <= 7;
+        return BoardGeometry.IsWithinBoard(file, rank);
     }
 }

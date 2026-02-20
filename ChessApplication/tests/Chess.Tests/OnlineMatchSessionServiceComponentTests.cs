@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using MultiplayerServer.Application.Matches;
 using Xunit;
+using MultiplayerServerProgram = Program;
 
 namespace Chess.Tests;
 
@@ -17,7 +18,7 @@ public sealed class OnlineMatchSessionServiceComponentTests
     [Fact]
     public async Task CreateJoinAndMove_HappyPathStaysAuthoritative()
     {
-        await using var factory = new WebApplicationFactory<Program>();
+        await using var factory = new WebApplicationFactory<MultiplayerServerProgram>();
         await using var creator = CreateHarness(factory);
         await using var joiner = CreateHarness(factory);
 
@@ -46,7 +47,7 @@ public sealed class OnlineMatchSessionServiceComponentTests
     [Fact]
     public async Task ResumeMatch_WithUnauthorizedToken_ReturnsExplicitAuthError()
     {
-        await using var factory = new WebApplicationFactory<Program>();
+        await using var factory = new WebApplicationFactory<MultiplayerServerProgram>();
         await using var owner = CreateHarness(factory);
         await using var unauthorized = CreateHarness(factory);
 
@@ -68,7 +69,7 @@ public sealed class OnlineMatchSessionServiceComponentTests
     [Fact]
     public async Task SnapshotRecovery_AfterDisconnect_ResyncsDeterministically()
     {
-        await using var factory = new WebApplicationFactory<Program>();
+        await using var factory = new WebApplicationFactory<MultiplayerServerProgram>();
         await using var creator = CreateHarness(factory);
         await using var joiner = CreateHarness(factory);
 
@@ -124,10 +125,10 @@ public sealed class OnlineMatchSessionServiceComponentTests
         Assert.Equal(GameStatus.BlackWin, joiner.Session.CurrentGameState!.Status);
     }
 
-    private static WebApplicationFactory<Program> CreateFactoryWithDisconnectPolicy(
+    private static WebApplicationFactory<MultiplayerServerProgram> CreateFactoryWithDisconnectPolicy(
         Action<MatchDisconnectPolicyOptions> configurePolicy)
     {
-        return new WebApplicationFactory<Program>()
+        return new WebApplicationFactory<MultiplayerServerProgram>()
             .WithWebHostBuilder(
                 builder =>
                 {
@@ -139,7 +140,7 @@ public sealed class OnlineMatchSessionServiceComponentTests
                 });
     }
 
-    private static SessionHarness CreateHarness(WebApplicationFactory<Program> factory)
+    private static SessionHarness CreateHarness(WebApplicationFactory<MultiplayerServerProgram> factory)
     {
         var httpClient = new HttpClient(factory.Server.CreateHandler())
         {
@@ -167,10 +168,9 @@ public sealed class OnlineMatchSessionServiceComponentTests
 
     private static char PieceAt(OnlineMatchSnapshot snapshot, string coordinate)
     {
-        var file = coordinate[0] - 'a';
-        var rank = coordinate[1] - '1';
-        var row = 7 - rank;
-        return snapshot.Board[row][file];
+        var square = BoardGeometry.ParseCoordinate(coordinate);
+        var row = 7 - square.Rank;
+        return snapshot.Board[row][square.File];
     }
 
     private static async Task WaitForConditionAsync(Func<bool> condition, TimeSpan timeout)

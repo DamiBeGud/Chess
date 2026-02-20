@@ -40,7 +40,7 @@ public sealed class BoardSquareViewModel : INotifyPropertyChanged
         System.ArgumentNullException.ThrowIfNull(pieceAssetResolver);
         Square = square;
         IsLightSquare = (square.File + square.Rank) % 2 != 0;
-        CoordinateLabel = $"{(char)('a' + square.File)}{square.Rank + 1}";
+        CoordinateLabel = BoardGeometry.ToCoordinate(square);
         ClickCommand = clickCommand;
         _pieceAssetResolver = pieceAssetResolver;
     }

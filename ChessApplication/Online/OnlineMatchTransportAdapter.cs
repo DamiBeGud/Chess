@@ -39,8 +39,8 @@ internal sealed class OnlineMatchTransportAdapter : IOnlineMatchTransportAdapter
             new OnlineSubmitMoveRequest(
                 credentials.MatchId,
                 credentials.PlayerToken,
-                ToCoordinate(fromSquare),
-                ToCoordinate(toSquare),
+                BoardGeometry.ToCoordinate(fromSquare),
+                BoardGeometry.ToCoordinate(toSquare),
                 ToPromotionToken(promotionPieceType)),
             cancellationToken);
     }
@@ -54,11 +54,6 @@ internal sealed class OnlineMatchTransportAdapter : IOnlineMatchTransportAdapter
         return _httpClient.GetSnapshotAsync(
             new OnlineSnapshotRequest(credentials.MatchId, credentials.PlayerToken),
             cancellationToken);
-    }
-
-    private static string ToCoordinate(Square square)
-    {
-        return $"{(char)('a' + square.File)}{square.Rank + 1}";
     }
 
     private static string? ToPromotionToken(PieceType? promotionPieceType)

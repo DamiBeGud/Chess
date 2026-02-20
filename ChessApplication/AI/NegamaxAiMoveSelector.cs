@@ -115,11 +115,6 @@ public sealed class NegamaxAiMoveSelector : IAiMoveSelector
 
     private static string GetMoveSortKey(Move move)
     {
-        return $"{SquareToCoordinate(move.From)}:{SquareToCoordinate(move.To)}:{(int?)move.PromotionPieceType ?? -1}:{move.IsCastling}:{move.IsEnPassant}";
-    }
-
-    private static string SquareToCoordinate(Square square)
-    {
-        return $"{(char)('a' + square.File)}{square.Rank + 1}";
+        return $"{BoardGeometry.ToCoordinate(move.From)}:{BoardGeometry.ToCoordinate(move.To)}:{(int?)move.PromotionPieceType ?? -1}:{move.IsCastling}:{move.IsEnPassant}";
     }
 }
