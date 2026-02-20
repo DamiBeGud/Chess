@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input;
@@ -10,6 +11,7 @@ using Chess.AI;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
+using Chess.Online;
 using Chess.Persistence;
 using Chess.UI.Assets;
 using Chess.UI.ViewModels;
@@ -615,10 +617,100 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.IsAiThinking);
     }
 
+    [Fact]
+    public async Task CreateOnlineMatchCommand_WhenTransportThrows_ShowsDeterministicFeedback()
+    {
+        var onlineService = new FakeOnlineMatchSessionService
+        {
+            CreateMatchAsyncHandler = _ => Task.FromException<OnlineOperationResult<OnlineCreatedMatch>>(new HttpRequestException("simulated transport failure"))
+        };
+        var viewModel = CreateOnlineViewModel(onlineService);
+
+        Assert.True(viewModel.CreateOnlineMatchCommand.CanExecute(null));
+        viewModel.CreateOnlineMatchCommand.Execute(null);
+
+        await WaitForConditionAsync(() => !viewModel.IsOnlineOperationInProgress);
+
+        Assert.Equal(
+            "Unable to create online match. Network error. Check your connection and try again.",
+            viewModel.FeedbackText);
+        Assert.Equal(1, onlineService.CreateMatchCallCount);
+    }
+
+    [Fact]
+    public async Task CreateOnlineMatchCommand_IsNonReentrantAndDisablesOnlineCommandsWhileBusy()
+    {
+        var createCompletion = new TaskCompletionSource<OnlineOperationResult<OnlineCreatedMatch>>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var onlineService = new FakeOnlineMatchSessionService
+        {
+            CreateMatchAsyncHandler = _ => createCompletion.Task
+        };
+        var viewModel = CreateOnlineViewModel(onlineService);
+
+        viewModel.CreateOnlineMatchCommand.Execute(null);
+        await WaitForConditionAsync(() => viewModel.IsOnlineOperationInProgress);
+
+        Assert.False(viewModel.CreateOnlineMatchCommand.CanExecute(null));
+        Assert.False(viewModel.JoinOnlineMatchCommand.CanExecute(null));
+        Assert.False(viewModel.LeaveOnlineMatchCommand.CanExecute(null));
+        Assert.False(viewModel.ResyncOnlineMatchCommand.CanExecute(null));
+
+        viewModel.CreateOnlineMatchCommand.Execute(null);
+        Assert.Equal(1, onlineService.CreateMatchCallCount);
+
+        createCompletion.SetResult(OnlineOperationResult<OnlineCreatedMatch>.Failure(new OnlineUserError("busy_test", "simulated failure", OnlineUserAction.Retry)));
+        await WaitForConditionAsync(() => !viewModel.IsOnlineOperationInProgress);
+
+        Assert.True(viewModel.CreateOnlineMatchCommand.CanExecute(null));
+        Assert.True(viewModel.JoinOnlineMatchCommand.CanExecute(null));
+        Assert.False(viewModel.LeaveOnlineMatchCommand.CanExecute(null));
+        Assert.False(viewModel.ResyncOnlineMatchCommand.CanExecute(null));
+    }
+
+    [Fact]
+    public async Task OnlineSquareClick_SubmitMoveException_ShowsDeterministicFeedback()
+    {
+        var onlineState = CreateState(
+            GameStatus.InProgress,
+            PieceColor.White,
+            new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+            new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)),
+            new PiecePlacement(new Square(4, 1), new Piece(PieceType.Pawn, PieceColor.White)));
+        var onlineService = new FakeOnlineMatchSessionService
+        {
+            IsInMatch = true,
+            IsConnected = true,
+            MatchId = "match-1",
+            JoinCode = "ABC123",
+            Seat = PieceColor.White,
+            CurrentGameState = onlineState,
+            SubmitMoveAsyncHandler = (_, _, _, _) => Task.FromException<OnlineOperationResult<OnlineMatchSnapshot>>(new TimeoutException("simulated timeout"))
+        };
+        var viewModel = CreateOnlineViewModel(onlineService);
+        var e2 = FindSquare(viewModel, 4, 1);
+        var e4 = FindSquare(viewModel, 4, 3);
+
+        e2.ClickCommand.Execute(null);
+        e4.ClickCommand.Execute(null);
+
+        await WaitForConditionAsync(() => !viewModel.IsOnlineOperationInProgress);
+
+        Assert.Equal(
+            "Unable to submit online move. Network error. Check your connection and try again.",
+            viewModel.FeedbackText);
+        Assert.Equal(1, onlineService.SubmitMoveCallCount);
+    }
+
     private static MainWindowViewModel CreateViewModel()
     {
         var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
         return new MainWindowViewModel(session, CreateTestAssetResolver());
+    }
+
+    private static MainWindowViewModel CreateOnlineViewModel(FakeOnlineMatchSessionService onlineMatchSessionService)
+    {
+        var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
+        return new MainWindowViewModel(session, CreateTestAssetResolver(), new PassiveAiTurnService(), onlineMatchSessionService);
     }
 
     private static MainWindowViewModel CreateAiEnabledViewModel()
@@ -861,6 +953,144 @@ public sealed class MainWindowViewModelTests
             CancellationToken cancellationToken = default)
         {
             throw new InvalidOperationException("simulated AI failure");
+        }
+    }
+
+    private sealed class PassiveAiTurnService : IAiTurnService
+    {
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return false;
+        }
+
+        public Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<Move?>(null);
+        }
+    }
+
+    private sealed class FakeOnlineMatchSessionService : IOnlineMatchSessionService
+    {
+        private static readonly OnlineUserError DefaultFailure = new("test_error", "Not configured.", OnlineUserAction.Retry);
+
+        public event EventHandler? SessionStateChanged;
+        public event EventHandler<OnlineUserError>? SessionError;
+
+        public bool IsInMatch { get; set; }
+        public bool IsConnected { get; set; }
+        public string? MatchId { get; set; }
+        public string? JoinCode { get; set; }
+        public PieceColor? Seat { get; set; }
+        public OnlineMatchSnapshot? CurrentSnapshot { get; set; }
+        public GameState? CurrentGameState { get; set; }
+        public long LastSequence { get; set; }
+
+        public int CreateMatchCallCount { get; private set; }
+        public int JoinMatchCallCount { get; private set; }
+        public int SubmitMoveCallCount { get; private set; }
+        public int RequestResyncCallCount { get; private set; }
+        public int LeaveMatchCallCount { get; private set; }
+
+        public Func<CancellationToken, Task<OnlineOperationResult<OnlineCreatedMatch>>>? CreateMatchAsyncHandler { get; set; }
+        public Func<string, CancellationToken, Task<OnlineOperationResult<OnlineJoinedMatch>>>? JoinMatchAsyncHandler { get; set; }
+        public Func<Square, Square, PieceType?, CancellationToken, Task<OnlineOperationResult<OnlineMatchSnapshot>>>? SubmitMoveAsyncHandler { get; set; }
+        public Func<CancellationToken, Task<OnlineOperationResult<OnlineMatchSnapshot>>>? RequestResyncAsyncHandler { get; set; }
+        public Func<CancellationToken, Task>? LeaveMatchAsyncHandler { get; set; }
+
+        public Task<OnlineOperationResult<OnlineCreatedMatch>> CreateMatchAsync(CancellationToken cancellationToken = default)
+        {
+            CreateMatchCallCount++;
+            if (CreateMatchAsyncHandler is not null)
+            {
+                return CreateMatchAsyncHandler(cancellationToken);
+            }
+
+            return Task.FromResult(OnlineOperationResult<OnlineCreatedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineJoinedMatch>> JoinMatchAsync(string joinCode, CancellationToken cancellationToken = default)
+        {
+            JoinMatchCallCount++;
+            if (JoinMatchAsyncHandler is not null)
+            {
+                return JoinMatchAsyncHandler(joinCode, cancellationToken);
+            }
+
+            return Task.FromResult(OnlineOperationResult<OnlineJoinedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineResumedMatch>> ResumeMatchAsync(
+            string matchId,
+            string playerToken,
+            PieceColor seat,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineResumedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> SubmitMoveAsync(
+            Square fromSquare,
+            Square toSquare,
+            PieceType? promotionPieceType = null,
+            CancellationToken cancellationToken = default)
+        {
+            SubmitMoveCallCount++;
+            if (SubmitMoveAsyncHandler is not null)
+            {
+                return SubmitMoveAsyncHandler(fromSquare, toSquare, promotionPieceType, cancellationToken);
+            }
+
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> RecoverAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> RequestResyncAsync(CancellationToken cancellationToken = default)
+        {
+            RequestResyncCallCount++;
+            if (RequestResyncAsyncHandler is not null)
+            {
+                return RequestResyncAsyncHandler(cancellationToken);
+            }
+
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task SuspendRealtimeAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task LeaveMatchAsync(CancellationToken cancellationToken = default)
+        {
+            LeaveMatchCallCount++;
+            if (LeaveMatchAsyncHandler is not null)
+            {
+                return LeaveMatchAsyncHandler(cancellationToken);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        public void RaiseSessionStateChanged()
+        {
+            SessionStateChanged?.Invoke(this, EventArgs.Empty);
+        }
+
+        public void RaiseSessionError(OnlineUserError error)
+        {
+            SessionError?.Invoke(this, error);
         }
     }
 }

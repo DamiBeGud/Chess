@@ -158,6 +158,44 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public void FullGame_FoolsMate_CompletesAndBlocksFurtherMoves()
+    {
+        var window = CreateWindow(CreateSessionService());
+
+        try
+        {
+            window.Show();
+            window.Focus();
+
+            Click(FindSquareButton(window, "f2"));
+            Click(FindSquareButton(window, "f3"));
+            Click(FindSquareButton(window, "e7"));
+            Click(FindSquareButton(window, "e5"));
+            Click(FindSquareButton(window, "g2"));
+            Click(FindSquareButton(window, "g4"));
+            Click(FindSquareButton(window, "d8"));
+            Click(FindSquareButton(window, "h4"));
+
+            Assert.Equal("Status: Black wins.", GetGameStatusText(window));
+            Assert.Equal("Last action: Black moved Queen from d8 to h4.", GetLastActionText(window));
+            Assert.Equal(string.Empty, GetFeedbackText(window));
+            AssertSquareHasNoPieceAsset(FindSquareButton(window, "d8"));
+            AssertSquareHasPieceAsset(FindSquareButton(window, "h4"), "black-queen");
+            Assert.Equal(new[] { "d8", "h4" }, GetLastMoveHighlightedSquareCoordinates(window));
+            Assert.Equal(4, GetMoveHistoryEntries(window).Count);
+
+            Click(FindSquareButton(window, "e2"));
+
+            Assert.Equal("Game is finished (BlackWin). Start a new game to continue.", GetFeedbackText(window));
+            Assert.Equal("Status: Black wins.", GetGameStatusText(window));
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
     public void SidePanel_RendersStatusLastActionAndMoveHistory()
     {
         var window = CreateWindow(CreateSessionService());

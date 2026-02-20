@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
@@ -39,6 +40,10 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IMainWindowAiTurnCoordinator _aiTurnCoordinator;
     private readonly IOnlineMatchSessionService _onlineMatchSessionService;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
+    private readonly AsyncRelayCommand _createOnlineMatchCommand;
+    private readonly AsyncRelayCommand _joinOnlineMatchCommand;
+    private readonly AsyncRelayCommand _leaveOnlineMatchCommand;
+    private readonly AsyncRelayCommand _resyncOnlineMatchCommand;
     private string _gameStatusText = string.Empty;
     private string _lastActionText = string.Empty;
     private string _feedbackText = string.Empty;
@@ -147,14 +152,31 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         NewGameCommand = new RelayCommand(StartNewGame);
         SaveGameCommand = new RelayCommand(async () => await SaveGameAsync());
         LoadGameCommand = new RelayCommand(async () => await LoadGameAsync());
-        CreateOnlineMatchCommand = new RelayCommand(() => _ = CreateOnlineMatchAsync());
-        JoinOnlineMatchCommand = new RelayCommand(() => _ = JoinOnlineMatchAsync());
-        LeaveOnlineMatchCommand = new RelayCommand(() => _ = LeaveOnlineMatchAsync());
-        ResyncOnlineMatchCommand = new RelayCommand(() => _ = ResyncOnlineMatchAsync());
+        _createOnlineMatchCommand = new AsyncRelayCommand(
+            CreateOnlineMatchAsync,
+            exception => HandleOnlineCommandException(OnlineOperation.CreateMatch, exception),
+            CanCreateOrJoinOnlineMatch);
+        _joinOnlineMatchCommand = new AsyncRelayCommand(
+            JoinOnlineMatchAsync,
+            exception => HandleOnlineCommandException(OnlineOperation.JoinMatch, exception),
+            CanCreateOrJoinOnlineMatch);
+        _leaveOnlineMatchCommand = new AsyncRelayCommand(
+            LeaveOnlineMatchAsync,
+            exception => HandleOnlineCommandException(OnlineOperation.LeaveMatch, exception),
+            CanLeaveOrResyncOnlineMatch);
+        _resyncOnlineMatchCommand = new AsyncRelayCommand(
+            ResyncOnlineMatchAsync,
+            exception => HandleOnlineCommandException(OnlineOperation.ResyncMatch, exception),
+            CanLeaveOrResyncOnlineMatch);
+        CreateOnlineMatchCommand = _createOnlineMatchCommand;
+        JoinOnlineMatchCommand = _joinOnlineMatchCommand;
+        LeaveOnlineMatchCommand = _leaveOnlineMatchCommand;
+        ResyncOnlineMatchCommand = _resyncOnlineMatchCommand;
 
         _onlineMatchSessionService.SessionStateChanged += OnOnlineSessionStateChanged;
         _onlineMatchSessionService.SessionError += OnOnlineSessionError;
         UpdateOnlineSessionText();
+        NotifyOnlineCommandCanExecuteChanged();
 
         StartNewGame();
     }
@@ -513,7 +535,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
                     return true;
                 }
 
-                OnSquareClicked(_selectionState.FocusedSquare);
+                ExecuteSquareClick(_selectionState.FocusedSquare);
                 return true;
             case MainWindowKeyboardActionKind.ClearSelection:
                 ClearSelection();
@@ -524,14 +546,32 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         }
     }
 
-    private void OnSquareClicked(Square square)
+    private void ExecuteSquareClick(Square square)
     {
-        if (IsOnlineMatchActive)
+        var squareViewModel = _boardSquares[GetBoardSquareIndex(square)];
+        var clickCommand = squareViewModel.ClickCommand;
+
+        if (!clickCommand.CanExecute(null))
         {
-            _ = OnOnlineSquareClickedAsync(square);
             return;
         }
 
+        clickCommand.Execute(null);
+    }
+
+    private async Task OnSquareClickedAsync(Square square)
+    {
+        if (IsOnlineMatchActive)
+        {
+            await OnOnlineSquareClickedAsync(square);
+            return;
+        }
+
+        OnLocalSquareClicked(square);
+    }
+
+    private void OnLocalSquareClicked(Square square)
+    {
         SetFocusedSquare(square);
         var currentState = _gameSessionService.CurrentGameState;
 
@@ -642,29 +682,21 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             return;
         }
 
-        if (!BeginOnlineOperation())
-        {
-            return;
-        }
-
-        try
-        {
-            var submitResult = await _onlineMatchSessionService.SubmitMoveAsync(selectedSquare, square);
-            if (!submitResult.IsSuccess)
+        await RunOnlineOperationWithBusyStateAsync(
+            async () =>
             {
-                FeedbackText = submitResult.Error?.Message ?? "Move submission failed.";
-                return;
-            }
+                var submitResult = await _onlineMatchSessionService.SubmitMoveAsync(selectedSquare, square);
+                if (!submitResult.IsSuccess)
+                {
+                    FeedbackText = submitResult.Error?.Message ?? "Move submission failed.";
+                    return;
+                }
 
-            LastActionText = $"Last action: Submitted online move {_textFormatter.ToCoordinate(selectedSquare)} to {_textFormatter.ToCoordinate(square)}.";
-            FeedbackText = string.Empty;
-            ClearSelection();
-            RefreshBoardFromCurrentState();
-        }
-        finally
-        {
-            EndOnlineOperation();
-        }
+                LastActionText = $"Last action: Submitted online move {_textFormatter.ToCoordinate(selectedSquare)} to {_textFormatter.ToCoordinate(square)}.";
+                FeedbackText = string.Empty;
+                ClearSelection();
+                RefreshBoardFromCurrentState();
+            });
     }
 
     private void TrySelectSquare(Square square, GameState currentState)
@@ -814,6 +846,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         _isOnlineOperationInProgress = true;
         OnPropertyChanged(nameof(IsOnlineOperationInProgress));
+        NotifyOnlineCommandCanExecuteChanged();
         return true;
     }
 
@@ -826,6 +859,42 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
         _isOnlineOperationInProgress = false;
         OnPropertyChanged(nameof(IsOnlineOperationInProgress));
+        NotifyOnlineCommandCanExecuteChanged();
+    }
+
+    private async Task RunOnlineOperationWithBusyStateAsync(Func<Task> operationAsync)
+    {
+        if (!BeginOnlineOperation())
+        {
+            return;
+        }
+
+        try
+        {
+            await operationAsync();
+        }
+        finally
+        {
+            EndOnlineOperation();
+        }
+    }
+
+    private bool CanCreateOrJoinOnlineMatch()
+    {
+        return !_isOnlineOperationInProgress && !IsOnlineMatchActive;
+    }
+
+    private bool CanLeaveOrResyncOnlineMatch()
+    {
+        return !_isOnlineOperationInProgress && IsOnlineMatchActive;
+    }
+
+    private void NotifyOnlineCommandCanExecuteChanged()
+    {
+        _createOnlineMatchCommand.NotifyCanExecuteChanged();
+        _joinOnlineMatchCommand.NotifyCanExecuteChanged();
+        _leaveOnlineMatchCommand.NotifyCanExecuteChanged();
+        _resyncOnlineMatchCommand.NotifyCanExecuteChanged();
     }
 
     private GameState? GetDisplayGameState()
@@ -838,131 +907,99 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         return _gameSessionService.CurrentGameState;
     }
 
-    private async Task CreateOnlineMatchAsync()
+    private Task CreateOnlineMatchAsync()
     {
-        if (!BeginOnlineOperation())
-        {
-            return;
-        }
-
-        try
-        {
-            _aiTurnCoordinator.CancelInFlightAiTurn();
-            IsPlayVsAiEnabled = false;
-
-            var result = await _onlineMatchSessionService.CreateMatchAsync();
-            if (!result.IsSuccess)
+        return RunOnlineOperationWithBusyStateAsync(
+            async () =>
             {
-                FeedbackText = result.Error?.Message ?? "Unable to create online match.";
-                return;
-            }
+                _aiTurnCoordinator.CancelInFlightAiTurn();
+                IsPlayVsAiEnabled = false;
 
-            var created = result.Value!;
-            LastActionText = $"Last action: Created online match {created.MatchId}. Share join code {created.JoinCode}.";
-            FeedbackText = string.Empty;
-            ClearSelection();
-            RefreshBoardFromCurrentState();
-            UpdateOnlineSessionText();
-            OnPropertyChanged(nameof(IsAiAvailable));
-        }
-        finally
-        {
-            EndOnlineOperation();
-        }
+                var result = await _onlineMatchSessionService.CreateMatchAsync();
+                if (!result.IsSuccess)
+                {
+                    FeedbackText = result.Error?.Message ?? "Unable to create online match.";
+                    return;
+                }
+
+                var created = result.Value!;
+                LastActionText = $"Last action: Created online match {created.MatchId}. Share join code {created.JoinCode}.";
+                FeedbackText = string.Empty;
+                ClearSelection();
+                RefreshBoardFromCurrentState();
+                UpdateOnlineSessionText();
+                OnPropertyChanged(nameof(IsAiAvailable));
+            });
     }
 
-    private async Task JoinOnlineMatchAsync()
+    private Task JoinOnlineMatchAsync()
     {
-        if (!BeginOnlineOperation())
-        {
-            return;
-        }
-
-        try
-        {
-            var joinCode = OnlineJoinCode?.Trim() ?? string.Empty;
-            if (string.IsNullOrWhiteSpace(joinCode))
+        return RunOnlineOperationWithBusyStateAsync(
+            async () =>
             {
-                FeedbackText = "Join code is required.";
-                return;
-            }
+                var joinCode = OnlineJoinCode?.Trim() ?? string.Empty;
+                if (string.IsNullOrWhiteSpace(joinCode))
+                {
+                    FeedbackText = "Join code is required.";
+                    return;
+                }
 
-            _aiTurnCoordinator.CancelInFlightAiTurn();
-            IsPlayVsAiEnabled = false;
+                _aiTurnCoordinator.CancelInFlightAiTurn();
+                IsPlayVsAiEnabled = false;
 
-            var result = await _onlineMatchSessionService.JoinMatchAsync(joinCode);
-            if (!result.IsSuccess)
-            {
-                FeedbackText = result.Error?.Message ?? "Unable to join online match.";
-                return;
-            }
+                var result = await _onlineMatchSessionService.JoinMatchAsync(joinCode);
+                if (!result.IsSuccess)
+                {
+                    FeedbackText = result.Error?.Message ?? "Unable to join online match.";
+                    return;
+                }
 
-            var joined = result.Value!;
-            LastActionText = $"Last action: Joined online match {joined.MatchId} as {joined.Seat}.";
-            FeedbackText = string.Empty;
-            ClearSelection();
-            RefreshBoardFromCurrentState();
-            UpdateOnlineSessionText();
-            OnPropertyChanged(nameof(IsAiAvailable));
-        }
-        finally
-        {
-            EndOnlineOperation();
-        }
+                var joined = result.Value!;
+                LastActionText = $"Last action: Joined online match {joined.MatchId} as {joined.Seat}.";
+                FeedbackText = string.Empty;
+                ClearSelection();
+                RefreshBoardFromCurrentState();
+                UpdateOnlineSessionText();
+                OnPropertyChanged(nameof(IsAiAvailable));
+            });
     }
 
-    private async Task LeaveOnlineMatchAsync()
+    private Task LeaveOnlineMatchAsync()
     {
-        if (!BeginOnlineOperation())
-        {
-            return;
-        }
-
-        try
-        {
-            await _onlineMatchSessionService.LeaveMatchAsync();
-            _gameSessionService.StartNewGame();
-            ClearSelection();
-            SetFocusedSquare(DefaultKeyboardFocusSquare);
-            RefreshBoardFromCurrentState();
-            LastActionText = "Last action: Left online match and started a local game.";
-            FeedbackText = string.Empty;
-            UpdateOnlineSessionText();
-            OnPropertyChanged(nameof(IsOnlineMatchActive));
-            OnPropertyChanged(nameof(IsAiAvailable));
-        }
-        finally
-        {
-            EndOnlineOperation();
-        }
+        return RunOnlineOperationWithBusyStateAsync(
+            async () =>
+            {
+                await _onlineMatchSessionService.LeaveMatchAsync();
+                _gameSessionService.StartNewGame();
+                ClearSelection();
+                SetFocusedSquare(DefaultKeyboardFocusSquare);
+                RefreshBoardFromCurrentState();
+                LastActionText = "Last action: Left online match and started a local game.";
+                FeedbackText = string.Empty;
+                UpdateOnlineSessionText();
+                OnPropertyChanged(nameof(IsOnlineMatchActive));
+                OnPropertyChanged(nameof(IsAiAvailable));
+            });
     }
 
-    private async Task ResyncOnlineMatchAsync()
+    private Task ResyncOnlineMatchAsync()
     {
-        if (!BeginOnlineOperation())
-        {
-            return;
-        }
-
-        try
-        {
-            var result = await _onlineMatchSessionService.RequestResyncAsync();
-            if (!result.IsSuccess)
+        return RunOnlineOperationWithBusyStateAsync(
+            async () =>
             {
-                FeedbackText = result.Error?.Message ?? "Unable to resync online match.";
-                return;
-            }
+                var result = await _onlineMatchSessionService.RequestResyncAsync();
+                if (!result.IsSuccess)
+                {
+                    FeedbackText = result.Error?.Message ?? "Unable to resync online match.";
+                    return;
+                }
 
-            LastActionText = "Last action: Resynced online match state.";
-            FeedbackText = string.Empty;
-            ClearSelection();
-            RefreshBoardFromCurrentState();
-            UpdateOnlineSessionText();
-        }
-        finally
-        {
-            EndOnlineOperation();
-        }
+                LastActionText = "Last action: Resynced online match state.";
+                FeedbackText = string.Empty;
+                ClearSelection();
+                RefreshBoardFromCurrentState();
+                UpdateOnlineSessionText();
+            });
     }
 
     private void OnOnlineSessionStateChanged(object? sender, EventArgs e)
@@ -971,6 +1008,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         UpdateOnlineSessionText();
         OnPropertyChanged(nameof(IsOnlineMatchActive));
         OnPropertyChanged(nameof(IsAiAvailable));
+        NotifyOnlineCommandCanExecuteChanged();
     }
 
     private void OnOnlineSessionError(object? sender, OnlineUserError error)
@@ -995,6 +1033,39 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : $" Join code: {_onlineMatchSessionService.JoinCode}.";
 
         OnlineSessionText = $"Online: {seatText} in match {matchId} ({connectionText}).{joinCodeText}";
+    }
+
+    private void HandleOnlineCommandException(OnlineOperation operation, Exception exception)
+    {
+        FeedbackText = MapOnlineCommandException(operation, exception);
+    }
+
+    private static string MapOnlineCommandException(OnlineOperation operation, Exception exception)
+    {
+        if (exception is OperationCanceledException)
+        {
+            return BuildOnlineOperationMessage(operation, "Request was canceled.");
+        }
+
+        if (exception is HttpRequestException or TimeoutException or IOException)
+        {
+            return BuildOnlineOperationMessage(operation, "Network error. Check your connection and try again.");
+        }
+
+        return BuildOnlineOperationMessage(operation, "Unexpected error. Try again.");
+    }
+
+    private static string BuildOnlineOperationMessage(OnlineOperation operation, string detail)
+    {
+        return operation switch
+        {
+            OnlineOperation.CreateMatch => $"Unable to create online match. {detail}",
+            OnlineOperation.JoinMatch => $"Unable to join online match. {detail}",
+            OnlineOperation.LeaveMatch => $"Unable to leave online match. {detail}",
+            OnlineOperation.ResyncMatch => $"Unable to resync online match. {detail}",
+            OnlineOperation.SubmitMove => $"Unable to submit online move. {detail}",
+            _ => $"Online operation failed. {detail}"
+        };
     }
 
     private static bool TryGetPieceAt(GameState gameState, Square square, out Piece? piece)
@@ -1038,9 +1109,12 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             for (var file = 0; file < 8; file++)
             {
                 var square = new Square(file, rank);
+                var clickCommand = new AsyncRelayCommand(
+                    () => OnSquareClickedAsync(square),
+                    exception => HandleOnlineCommandException(OnlineOperation.SubmitMove, exception));
                 var squareViewModel = new BoardSquareViewModel(
                     square,
-                    new RelayCommand(() => OnSquareClicked(square)),
+                    clickCommand,
                     _pieceAssetResolver);
                 boardSquares.Add(squareViewModel);
             }
@@ -1071,6 +1145,20 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             : localAppDataDirectory;
 
         return Path.Combine(baseDirectory, "Chess", "saved-game.json");
+    }
+
+    private static int GetBoardSquareIndex(Square square)
+    {
+        return ((7 - square.Rank) * 8) + square.File;
+    }
+
+    private enum OnlineOperation
+    {
+        CreateMatch,
+        JoinMatch,
+        LeaveMatch,
+        ResyncMatch,
+        SubmitMove
     }
 
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
