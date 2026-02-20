@@ -42,7 +42,7 @@ public sealed class MainWindowViewModel :
     private readonly IMainWindowTextFormatter _textFormatter;
     private readonly IMainWindowKeyboardNavigator _keyboardNavigator;
     private readonly IMainWindowAiTurnCoordinator _aiTurnCoordinator;
-    private readonly IOnlineMatchSessionService _onlineMatchSessionService;
+    private readonly IOnlineMatchSessionReadModel _onlineMatchSessionService;
     private readonly IMainWindowLocalPlayCoordinator _localPlayCoordinator;
     private readonly IMainWindowOnlinePlayCoordinator _onlinePlayCoordinator;
     private readonly IMainWindowPersistenceCoordinator _persistenceCoordinator;
@@ -97,11 +97,27 @@ public sealed class MainWindowViewModel :
             gameSessionService,
             pieceAssetResolver,
             aiTurnService,
+            (IOnlineMatchSessionReadModel)onlineMatchSessionService,
+            (IOnlineMatchSessionCommands)onlineMatchSessionService)
+    {
+    }
+
+    public MainWindowViewModel(
+        IGameSessionService gameSessionService,
+        IPieceAssetResolver pieceAssetResolver,
+        IAiTurnService aiTurnService,
+        IOnlineMatchSessionReadModel onlineMatchSessionReadModel,
+        IOnlineMatchSessionCommands onlineMatchSessionCommands)
+        : this(
+            gameSessionService,
+            pieceAssetResolver,
+            aiTurnService,
             new MainWindowSelectionState(DefaultKeyboardFocusSquare),
             new MainWindowTextFormatter(pieceAssetResolver),
             new MainWindowKeyboardNavigator(),
             new MainWindowAiTurnCoordinator(aiTurnService),
-            onlineMatchSessionService)
+            onlineMatchSessionReadModel,
+            onlineMatchSessionCommands)
     {
     }
 
@@ -142,9 +158,36 @@ public sealed class MainWindowViewModel :
             textFormatter,
             keyboardNavigator,
             aiTurnCoordinator,
-            onlineMatchSessionService,
+            (IOnlineMatchSessionReadModel)onlineMatchSessionService,
+            (IOnlineMatchSessionCommands)onlineMatchSessionService)
+    {
+    }
+
+    internal MainWindowViewModel(
+        IGameSessionService gameSessionService,
+        IPieceAssetResolver pieceAssetResolver,
+        IAiTurnService aiTurnService,
+        IMainWindowSelectionState selectionState,
+        IMainWindowTextFormatter textFormatter,
+        IMainWindowKeyboardNavigator keyboardNavigator,
+        IMainWindowAiTurnCoordinator aiTurnCoordinator,
+        IOnlineMatchSessionReadModel onlineMatchSessionReadModel,
+        IOnlineMatchSessionCommands onlineMatchSessionCommands)
+        : this(
+            gameSessionService,
+            pieceAssetResolver,
+            aiTurnService,
+            selectionState,
+            textFormatter,
+            keyboardNavigator,
+            aiTurnCoordinator,
+            onlineMatchSessionReadModel,
             new MainWindowLocalPlayCoordinator(gameSessionService, selectionState, textFormatter),
-            new MainWindowOnlinePlayCoordinator(onlineMatchSessionService, selectionState, textFormatter),
+            new MainWindowOnlinePlayCoordinator(
+                onlineMatchSessionReadModel,
+                onlineMatchSessionCommands,
+                selectionState,
+                textFormatter),
             new MainWindowPersistenceCoordinator(gameSessionService))
     {
     }
@@ -157,7 +200,7 @@ public sealed class MainWindowViewModel :
         IMainWindowTextFormatter textFormatter,
         IMainWindowKeyboardNavigator keyboardNavigator,
         IMainWindowAiTurnCoordinator aiTurnCoordinator,
-        IOnlineMatchSessionService onlineMatchSessionService,
+        IOnlineMatchSessionReadModel onlineMatchSessionReadModel,
         IMainWindowLocalPlayCoordinator localPlayCoordinator,
         IMainWindowOnlinePlayCoordinator onlinePlayCoordinator,
         IMainWindowPersistenceCoordinator persistenceCoordinator)
@@ -169,7 +212,7 @@ public sealed class MainWindowViewModel :
         ArgumentNullException.ThrowIfNull(textFormatter);
         ArgumentNullException.ThrowIfNull(keyboardNavigator);
         ArgumentNullException.ThrowIfNull(aiTurnCoordinator);
-        ArgumentNullException.ThrowIfNull(onlineMatchSessionService);
+        ArgumentNullException.ThrowIfNull(onlineMatchSessionReadModel);
         ArgumentNullException.ThrowIfNull(localPlayCoordinator);
         ArgumentNullException.ThrowIfNull(onlinePlayCoordinator);
         ArgumentNullException.ThrowIfNull(persistenceCoordinator);
@@ -181,7 +224,7 @@ public sealed class MainWindowViewModel :
         _textFormatter = textFormatter;
         _keyboardNavigator = keyboardNavigator;
         _aiTurnCoordinator = aiTurnCoordinator;
-        _onlineMatchSessionService = onlineMatchSessionService;
+        _onlineMatchSessionService = onlineMatchSessionReadModel;
         _localPlayCoordinator = localPlayCoordinator;
         _onlinePlayCoordinator = onlinePlayCoordinator;
         _persistenceCoordinator = persistenceCoordinator;

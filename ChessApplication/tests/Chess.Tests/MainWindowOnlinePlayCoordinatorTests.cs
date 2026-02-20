@@ -12,6 +12,17 @@ namespace Chess.Tests;
 public sealed class MainWindowOnlinePlayCoordinatorTests
 {
     [Fact]
+    public void Constructor_WithNullCommandDependency_Throws()
+    {
+        var selectionState = new MainWindowSelectionState(new Square(4, 1));
+        var textFormatter = new MainWindowTextFormatter(new PieceAssetResolver(_ => null));
+        var readModel = new StubOnlineMatchSessionService();
+
+        Assert.Throws<ArgumentNullException>(
+            () => new MainWindowOnlinePlayCoordinator(readModel, null!, selectionState, textFormatter));
+    }
+
+    [Fact]
     public async Task CreateOnlineMatchAsync_Success_UpdatesContextState()
     {
         var selectionState = new MainWindowSelectionState(new Square(4, 1));
@@ -22,7 +33,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
                 OnlineOperationResult<OnlineCreatedMatch>.Success(
                     new OnlineCreatedMatch("match-1", "ABC123", PieceColor.White)))
         };
-        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, onlineService, selectionState, textFormatter);
         var context = new FakeOnlinePlayContext();
 
         await coordinator.CreateOnlineMatchAsync(context);
@@ -49,7 +60,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
             IsInMatch = true,
             Seat = null
         };
-        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, onlineService, selectionState, textFormatter);
         var context = new FakeOnlinePlayContext
         {
             OnlineGameState = CreateOnlineGameState(PieceColor.White)
@@ -71,7 +82,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
             IsInMatch = true,
             Seat = PieceColor.White
         };
-        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, onlineService, selectionState, textFormatter);
         var context = new FakeOnlinePlayContext
         {
             OnlineGameState = null
@@ -111,7 +122,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
                             "RNBQKBNR"
                         ])))
         };
-        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, onlineService, selectionState, textFormatter);
         var context = new FakeOnlinePlayContext
         {
             OnlineGameState = CreateOnlineGameState(PieceColor.White)
@@ -259,7 +270,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         }
     }
 
-    private sealed class StubOnlineMatchSessionService : IOnlineMatchSessionService
+    private sealed class StubOnlineMatchSessionService : IOnlineMatchSessionReadModel, IOnlineMatchSessionCommands
     {
         private static readonly OnlineUserError DefaultFailure = new("test_error", "Not configured.", OnlineUserAction.Retry);
 

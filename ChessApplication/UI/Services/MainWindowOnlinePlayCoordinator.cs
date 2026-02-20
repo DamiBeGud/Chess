@@ -7,16 +7,19 @@ namespace Chess.UI.Services;
 
 internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoordinator
 {
-    private readonly IOnlineMatchSessionService _onlineMatchSessionService;
+    private readonly IOnlineMatchSessionReadModel _onlineMatchSessionReadModel;
+    private readonly IOnlineMatchSessionCommands _onlineMatchSessionCommands;
     private readonly IMainWindowSelectionState _selectionState;
     private readonly IMainWindowTextFormatter _textFormatter;
 
     internal MainWindowOnlinePlayCoordinator(
-        IOnlineMatchSessionService onlineMatchSessionService,
+        IOnlineMatchSessionReadModel onlineMatchSessionReadModel,
+        IOnlineMatchSessionCommands onlineMatchSessionCommands,
         IMainWindowSelectionState selectionState,
         IMainWindowTextFormatter textFormatter)
     {
-        _onlineMatchSessionService = onlineMatchSessionService ?? throw new ArgumentNullException(nameof(onlineMatchSessionService));
+        _onlineMatchSessionReadModel = onlineMatchSessionReadModel ?? throw new ArgumentNullException(nameof(onlineMatchSessionReadModel));
+        _onlineMatchSessionCommands = onlineMatchSessionCommands ?? throw new ArgumentNullException(nameof(onlineMatchSessionCommands));
         _selectionState = selectionState ?? throw new ArgumentNullException(nameof(selectionState));
         _textFormatter = textFormatter ?? throw new ArgumentNullException(nameof(textFormatter));
     }
@@ -45,7 +48,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
             return;
         }
 
-        if (_onlineMatchSessionService.Seat is not PieceColor localSeat)
+        if (_onlineMatchSessionReadModel.Seat is not PieceColor localSeat)
         {
             context.SetFeedback("Online seat is unknown. Try reconnecting.");
             return;
@@ -88,7 +91,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
         await context.RunOnlineOperationWithBusyStateAsync(
             async () =>
             {
-                var submitResult = await _onlineMatchSessionService.SubmitMoveAsync(selectedSquare, square);
+                var submitResult = await _onlineMatchSessionCommands.SubmitMoveAsync(selectedSquare, square);
                 if (!submitResult.IsSuccess)
                 {
                     context.SetFeedback(submitResult.Error?.Message ?? "Move submission failed.");
@@ -113,7 +116,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.CancelInFlightAiTurn();
                 context.DisablePlayVsAi();
 
-                var result = await _onlineMatchSessionService.CreateMatchAsync();
+                var result = await _onlineMatchSessionCommands.CreateMatchAsync();
                 if (!result.IsSuccess)
                 {
                     context.SetFeedback(result.Error?.Message ?? "Unable to create online match.");
@@ -147,7 +150,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.CancelInFlightAiTurn();
                 context.DisablePlayVsAi();
 
-                var result = await _onlineMatchSessionService.JoinMatchAsync(joinCode);
+                var result = await _onlineMatchSessionCommands.JoinMatchAsync(joinCode);
                 if (!result.IsSuccess)
                 {
                     context.SetFeedback(result.Error?.Message ?? "Unable to join online match.");
@@ -171,7 +174,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
         return context.RunOnlineOperationWithBusyStateAsync(
             async () =>
             {
-                await _onlineMatchSessionService.LeaveMatchAsync();
+                await _onlineMatchSessionCommands.LeaveMatchAsync();
                 context.StartNewLocalGame();
                 context.ClearSelection();
                 context.SetFocusedSquareToDefault();
@@ -191,7 +194,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
         return context.RunOnlineOperationWithBusyStateAsync(
             async () =>
             {
-                var result = await _onlineMatchSessionService.RequestResyncAsync();
+                var result = await _onlineMatchSessionCommands.RequestResyncAsync();
                 if (!result.IsSuccess)
                 {
                     context.SetFeedback(result.Error?.Message ?? "Unable to resync online match.");
