@@ -14,7 +14,11 @@ public sealed class RelayCommand : ICommand
         _canExecute = canExecute;
     }
 
-    public event EventHandler? CanExecuteChanged;
+    public event EventHandler? CanExecuteChanged
+    {
+        add { }
+        remove { }
+    }
 
     public bool CanExecute(object? parameter)
     {
@@ -24,10 +28,5 @@ public sealed class RelayCommand : ICommand
     public void Execute(object? parameter)
     {
         _execute();
-    }
-
-    public void NotifyCanExecuteChanged()
-    {
-        CanExecuteChanged?.Invoke(this, EventArgs.Empty);
     }
 }

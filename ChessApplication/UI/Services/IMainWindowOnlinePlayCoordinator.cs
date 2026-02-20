@@ -28,12 +28,6 @@ internal interface IMainWindowOnlinePlayContext
 
     void DisablePlayVsAi();
 
-    void UpdateOnlineSessionText();
-
-    void NotifyAiAvailabilityChanged();
-
-    void NotifyOnlineMatchActiveChanged();
-
     void StartNewLocalGame();
 
     void SetFocusedSquareToDefault();

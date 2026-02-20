@@ -46,8 +46,6 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         Assert.Equal(string.Empty, context.Feedback);
         Assert.Equal(1, context.ClearSelectionCallCount);
         Assert.Equal(1, context.RefreshBoardCallCount);
-        Assert.Equal(1, context.UpdateOnlineSessionTextCallCount);
-        Assert.Equal(1, context.NotifyAiAvailabilityChangedCallCount);
     }
 
     [Fact]
@@ -177,12 +175,6 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
 
         public int DisablePlayVsAiCallCount { get; private set; }
 
-        public int UpdateOnlineSessionTextCallCount { get; private set; }
-
-        public int NotifyAiAvailabilityChangedCallCount { get; private set; }
-
-        public int NotifyOnlineMatchActiveChangedCallCount { get; private set; }
-
         public int ClearSelectionCallCount { get; private set; }
 
         public int UpdateSquareHighlightsCallCount { get; private set; }
@@ -242,21 +234,6 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         public void DisablePlayVsAi()
         {
             DisablePlayVsAiCallCount++;
-        }
-
-        public void UpdateOnlineSessionText()
-        {
-            UpdateOnlineSessionTextCallCount++;
-        }
-
-        public void NotifyAiAvailabilityChanged()
-        {
-            NotifyAiAvailabilityChangedCallCount++;
-        }
-
-        public void NotifyOnlineMatchActiveChanged()
-        {
-            NotifyOnlineMatchActiveChangedCallCount++;
         }
 
         public void StartNewLocalGame()

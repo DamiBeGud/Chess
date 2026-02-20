@@ -293,6 +293,11 @@
                                     Content="Leave Match"
                                     Command="{Binding LeaveOnlineMatchCommand}" />
                         </Grid>
+                        <TextBlock x:Name="OnlineOperationInProgressTextBlock"
+                                   Text="Online operation in progress..."
+                                   IsVisible="{Binding IsOnlineOperationInProgress}"
+                                   FontStyle="Italic"
+                                   Opacity="0.85" />
                         <TextBlock x:Name="OnlineSessionTextBlock"
                                    Text="{Binding OnlineSessionText}"
                                    TextWrapping="Wrap"

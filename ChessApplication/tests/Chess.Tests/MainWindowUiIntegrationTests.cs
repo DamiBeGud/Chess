@@ -15,7 +15,9 @@ using Avalonia.VisualTree;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Engine;
+using Chess.Online;
 using Chess.Persistence;
+using Chess.UI.Assets;
 using Chess.UI.ViewModels;
 using Xunit;
 
@@ -213,6 +215,46 @@ public sealed class MainWindowUiIntegrationTests
             Assert.Empty(GetMoveHistoryEntries(window));
             Assert.NotNull(emptyHistoryText);
             Assert.True(emptyHistoryText!.IsVisible);
+        }
+        finally
+        {
+            window.Close();
+        }
+    }
+
+    [AvaloniaFact]
+    public async Task OnlineOperationInProgressTextBlock_TracksBusyState()
+    {
+        var createCompletion = new TaskCompletionSource<OnlineOperationResult<OnlineCreatedMatch>>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var onlineService = new StubOnlineMatchSessionService
+        {
+            CreateMatchAsyncHandler = _ => createCompletion.Task
+        };
+        var viewModel = new MainWindowViewModel(
+            CreateSessionService(),
+            new PieceAssetResolver(_ => new TestImage()),
+            new PassiveAiTurnService(),
+            onlineService);
+        var window = CreateWindow(viewModel);
+
+        try
+        {
+            window.Show();
+
+            var createButton = Assert.IsType<Button>(window.FindControl<Button>("CreateOnlineMatchButton"));
+            var busyTextBlock = Assert.IsType<TextBlock>(window.FindControl<TextBlock>("OnlineOperationInProgressTextBlock"));
+
+            Assert.False(busyTextBlock.IsVisible);
+
+            Click(createButton);
+            await WaitForConditionAsync(() => busyTextBlock.IsVisible);
+
+            createCompletion.SetResult(
+                OnlineOperationResult<OnlineCreatedMatch>.Failure(
+                    new OnlineUserError("busy_test", "simulated failure", OnlineUserAction.Retry)));
+
+            await WaitForConditionAsync(() => !busyTextBlock.IsVisible);
         }
         finally
         {
@@ -845,6 +887,11 @@ public sealed class MainWindowUiIntegrationTests
         return new MainWindow(viewModel);
     }
 
+    private static MainWindow CreateWindow(MainWindowViewModel viewModel)
+    {
+        return new MainWindow(viewModel);
+    }
+
     private static GameSessionService CreateSessionService()
     {
         return new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());
@@ -1186,6 +1233,115 @@ public sealed class MainWindowUiIntegrationTests
     {
         var textBlock = window.FindControl<TextBlock>("FocusedSquareTextBlock");
         return textBlock?.Text ?? string.Empty;
+    }
+
+    private sealed class PassiveAiTurnService : IAiTurnService
+    {
+        public bool CanRequestMove(PieceColor aiColor)
+        {
+            return false;
+        }
+
+        public Task<Move?> TryPlayTurnAsync(
+            PieceColor aiColor,
+            int searchDepth,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult<Move?>(null);
+        }
+    }
+
+    private sealed class StubOnlineMatchSessionService : IOnlineMatchSessionService
+    {
+        private static readonly OnlineUserError DefaultFailure = new("test_error", "Not configured.", OnlineUserAction.Retry);
+
+        public event EventHandler? SessionStateChanged
+        {
+            add { }
+            remove { }
+        }
+
+        public event EventHandler<OnlineUserError>? SessionError
+        {
+            add { }
+            remove { }
+        }
+
+        public bool IsInMatch { get; set; }
+
+        public bool IsConnected { get; set; }
+
+        public string? MatchId { get; set; }
+
+        public string? JoinCode { get; set; }
+
+        public PieceColor? Seat { get; set; }
+
+        public OnlineMatchSnapshot? CurrentSnapshot { get; set; }
+
+        public GameState? CurrentGameState { get; set; }
+
+        public long LastSequence { get; set; }
+
+        public Func<CancellationToken, Task<OnlineOperationResult<OnlineCreatedMatch>>>? CreateMatchAsyncHandler { get; set; }
+
+        public Task<OnlineOperationResult<OnlineCreatedMatch>> CreateMatchAsync(CancellationToken cancellationToken = default)
+        {
+            if (CreateMatchAsyncHandler is not null)
+            {
+                return CreateMatchAsyncHandler(cancellationToken);
+            }
+
+            return Task.FromResult(OnlineOperationResult<OnlineCreatedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineJoinedMatch>> JoinMatchAsync(string joinCode, CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineJoinedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineResumedMatch>> ResumeMatchAsync(
+            string matchId,
+            string playerToken,
+            PieceColor seat,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineResumedMatch>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> SubmitMoveAsync(
+            Square fromSquare,
+            Square toSquare,
+            PieceType? promotionPieceType = null,
+            CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> RecoverAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task<OnlineOperationResult<OnlineMatchSnapshot>> RequestResyncAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
+        }
+
+        public Task SuspendRealtimeAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public Task LeaveMatchAsync(CancellationToken cancellationToken = default)
+        {
+            return Task.CompletedTask;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
     }
 
     private readonly record struct LabelSnapshot(string Text, double X, double Y);

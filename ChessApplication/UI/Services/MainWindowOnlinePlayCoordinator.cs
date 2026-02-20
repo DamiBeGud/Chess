@@ -128,8 +128,6 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.SetFeedback(string.Empty);
                 context.ClearSelection();
                 context.RefreshBoardFromCurrentState();
-                context.UpdateOnlineSessionText();
-                context.NotifyAiAvailabilityChanged();
             });
     }
 
@@ -162,8 +160,6 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.SetFeedback(string.Empty);
                 context.ClearSelection();
                 context.RefreshBoardFromCurrentState();
-                context.UpdateOnlineSessionText();
-                context.NotifyAiAvailabilityChanged();
             });
     }
 
@@ -181,9 +177,6 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.RefreshBoardFromCurrentState();
                 context.SetLastAction("Last action: Left online match and started a local game.");
                 context.SetFeedback(string.Empty);
-                context.UpdateOnlineSessionText();
-                context.NotifyOnlineMatchActiveChanged();
-                context.NotifyAiAvailabilityChanged();
             });
     }
 
@@ -205,7 +198,6 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
                 context.SetFeedback(string.Empty);
                 context.ClearSelection();
                 context.RefreshBoardFromCurrentState();
-                context.UpdateOnlineSessionText();
             });
     }
 

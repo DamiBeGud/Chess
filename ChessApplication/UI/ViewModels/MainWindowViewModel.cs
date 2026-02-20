@@ -608,7 +608,7 @@ public sealed class MainWindowViewModel :
 
     private void RefreshBoardFromCurrentState()
     {
-        var currentState = GetDisplayGameState() ?? _gameSessionService.CurrentGameState;
+        var currentState = GetDisplayGameState();
         var piecesBySquare = currentState.Pieces.ToDictionary(placement => placement.Square, placement => placement.Piece);
         var hasLastMove = TryGetLastMoveSquares(currentState.MoveHistory, out var lastMoveFromSquare, out var lastMoveToSquare);
 
@@ -634,7 +634,7 @@ public sealed class MainWindowViewModel :
         return _aiTurnCoordinator.IsHumanInputBlockedByAiTurn(
             IsPlayVsAiEnabled,
             AiControlledColor,
-            GetDisplayGameState() ?? _gameSessionService.CurrentGameState);
+            GetDisplayGameState());
     }
 
     private string BuildAiThinkingFeedback()
@@ -738,7 +738,7 @@ public sealed class MainWindowViewModel :
         _resyncOnlineMatchCommand.NotifyCanExecuteChanged();
     }
 
-    private GameState? GetDisplayGameState()
+    private GameState GetDisplayGameState()
     {
         if (_onlineMatchSessionService.IsInMatch && _onlineMatchSessionService.CurrentGameState is not null)
         {
@@ -1005,21 +1005,6 @@ public sealed class MainWindowViewModel :
     void IMainWindowOnlinePlayContext.DisablePlayVsAi()
     {
         IsPlayVsAiEnabled = false;
-    }
-
-    void IMainWindowOnlinePlayContext.UpdateOnlineSessionText()
-    {
-        UpdateOnlineSessionText();
-    }
-
-    void IMainWindowOnlinePlayContext.NotifyAiAvailabilityChanged()
-    {
-        OnPropertyChanged(nameof(IsAiAvailable));
-    }
-
-    void IMainWindowOnlinePlayContext.NotifyOnlineMatchActiveChanged()
-    {
-        OnPropertyChanged(nameof(IsOnlineMatchActive));
     }
 
     void IMainWindowOnlinePlayContext.StartNewLocalGame()

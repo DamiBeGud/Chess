@@ -668,6 +668,39 @@ public sealed class MainWindowViewModelTests
     }
 
     [Fact]
+    public async Task CreateOnlineMatchCommand_WhenSessionStateChangedEventRaised_UpdatesOnlineStatusViaReadModelHook()
+    {
+        var onlineState = CreateState(
+            GameStatus.InProgress,
+            PieceColor.White,
+            new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+            new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)));
+        var onlineService = new FakeOnlineMatchSessionService();
+        onlineService.CreateMatchAsyncHandler = _ =>
+        {
+            onlineService.IsInMatch = true;
+            onlineService.IsConnected = true;
+            onlineService.MatchId = "match-1";
+            onlineService.JoinCode = "ABC123";
+            onlineService.Seat = PieceColor.White;
+            onlineService.CurrentGameState = onlineState;
+            onlineService.RaiseSessionStateChanged();
+            return Task.FromResult(
+                OnlineOperationResult<OnlineCreatedMatch>.Success(
+                    new OnlineCreatedMatch("match-1", "ABC123", PieceColor.White)));
+        };
+        var viewModel = CreateOnlineViewModel(onlineService);
+
+        Assert.True(viewModel.IsAiAvailable);
+        viewModel.CreateOnlineMatchCommand.Execute(null);
+
+        await WaitForConditionAsync(() => viewModel.IsOnlineMatchActive);
+
+        Assert.Equal("Online: White in match match-1 (connected). Join code: ABC123.", viewModel.OnlineSessionText);
+        Assert.False(viewModel.IsAiAvailable);
+    }
+
+    [Fact]
     public async Task OnlineSquareClick_SubmitMoveException_ShowsDeterministicFeedback()
     {
         var onlineState = CreateState(
