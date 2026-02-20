@@ -32,7 +32,7 @@ internal sealed class MainWindowOnlinePlayCoordinator : IMainWindowOnlinePlayCoo
             return;
         }
 
-        var currentState = context.GetDisplayGameState();
+        var currentState = context.GetOnlineGameState();
         if (currentState is null)
         {
             context.SetFeedback("Online state is not ready yet. Try resync.");

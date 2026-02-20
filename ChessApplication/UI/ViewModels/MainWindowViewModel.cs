@@ -914,9 +914,9 @@ public sealed class MainWindowViewModel :
 
     bool IMainWindowOnlinePlayContext.IsOnlineOperationInProgress => _isOnlineOperationInProgress;
 
-    GameState? IMainWindowOnlinePlayContext.GetDisplayGameState()
+    GameState? IMainWindowOnlinePlayContext.GetOnlineGameState()
     {
-        return GetDisplayGameState();
+        return _onlineMatchSessionService.CurrentGameState;
     }
 
     void IMainWindowOnlinePlayContext.SetFocusedSquare(Square square)

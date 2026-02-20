@@ -701,6 +701,30 @@ public sealed class MainWindowViewModelTests
         Assert.Equal(1, onlineService.SubmitMoveCallCount);
     }
 
+    [Fact]
+    public async Task OnlineSquareClick_WhenOnlineStateMissing_ShowsDeterministicFeedbackAndSkipsSubmit()
+    {
+        var onlineService = new FakeOnlineMatchSessionService
+        {
+            IsInMatch = true,
+            IsConnected = true,
+            MatchId = "match-1",
+            JoinCode = "ABC123",
+            Seat = PieceColor.White,
+            CurrentGameState = null
+        };
+        var viewModel = CreateOnlineViewModel(onlineService);
+        var e2 = FindSquare(viewModel, 4, 1);
+
+        e2.ClickCommand.Execute(null);
+
+        await WaitForConditionAsync(() =>
+            string.Equals(viewModel.FeedbackText, "Online state is not ready yet. Try resync.", StringComparison.Ordinal));
+
+        Assert.Equal("Online state is not ready yet. Try resync.", viewModel.FeedbackText);
+        Assert.Equal(0, onlineService.SubmitMoveCallCount);
+    }
+
     private static MainWindowViewModel CreateViewModel()
     {
         var session = new GameSessionService(new ChessGameEngine(), new JsonGameStateStore());

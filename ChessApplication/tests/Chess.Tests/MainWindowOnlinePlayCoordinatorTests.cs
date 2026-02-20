@@ -52,19 +52,7 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
         var context = new FakeOnlinePlayContext
         {
-            DisplayGameState = new GameState(
-                Pieces:
-                [
-                    new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
-                    new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black))
-                ],
-                SideToMove: PieceColor.White,
-                CastlingRights: CastlingRights.None,
-                EnPassantTarget: null,
-                HalfmoveClock: 0,
-                FullmoveNumber: 1,
-                Status: GameStatus.InProgress,
-                MoveHistory: [])
+            OnlineGameState = CreateOnlineGameState(PieceColor.White)
         };
 
         await coordinator.HandleSquareClickedAsync(new Square(4, 1), context);
@@ -73,11 +61,98 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         Assert.Equal(0, context.RunOnlineOperationWithBusyStateCallCount);
     }
 
+    [Fact]
+    public async Task HandleSquareClickedAsync_WhenOnlineStateMissing_ShowsDeterministicFeedbackAndDoesNotSubmit()
+    {
+        var selectionState = new MainWindowSelectionState(new Square(4, 1));
+        var textFormatter = new MainWindowTextFormatter(new PieceAssetResolver(_ => null));
+        var onlineService = new StubOnlineMatchSessionService
+        {
+            IsInMatch = true,
+            Seat = PieceColor.White
+        };
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var context = new FakeOnlinePlayContext
+        {
+            OnlineGameState = null
+        };
+
+        await coordinator.HandleSquareClickedAsync(new Square(4, 1), context);
+
+        Assert.Equal("Online state is not ready yet. Try resync.", context.Feedback);
+        Assert.Equal(0, onlineService.SubmitMoveCallCount);
+        Assert.Equal(0, context.RunOnlineOperationWithBusyStateCallCount);
+    }
+
+    [Fact]
+    public async Task HandleSquareClickedAsync_WithValidOnlineState_SubmitsMoveAndUpdatesContext()
+    {
+        var selectionState = new MainWindowSelectionState(new Square(4, 1));
+        var textFormatter = new MainWindowTextFormatter(new PieceAssetResolver(_ => null));
+        var onlineService = new StubOnlineMatchSessionService
+        {
+            IsInMatch = true,
+            Seat = PieceColor.White,
+            SubmitMoveAsyncHandler = (_, _, _, _) => Task.FromResult(
+                OnlineOperationResult<OnlineMatchSnapshot>.Success(
+                    new OnlineMatchSnapshot(
+                        MatchId: "match-1",
+                        SideToMove: OnlineMatchProtocolConstants.JoinerSeat,
+                        MoveNumber: 2,
+                        Board:
+                        [
+                            "rnbqkbnr",
+                            "pppppppp",
+                            "........",
+                            "........",
+                            "....P...",
+                            "........",
+                            "PPPP.PPP",
+                            "RNBQKBNR"
+                        ])))
+        };
+        var coordinator = new MainWindowOnlinePlayCoordinator(onlineService, selectionState, textFormatter);
+        var context = new FakeOnlinePlayContext
+        {
+            OnlineGameState = CreateOnlineGameState(PieceColor.White)
+        };
+        var e2 = new Square(4, 1);
+        var e4 = new Square(4, 3);
+
+        await coordinator.HandleSquareClickedAsync(e2, context);
+        await coordinator.HandleSquareClickedAsync(e4, context);
+
+        Assert.Equal(1, onlineService.SubmitMoveCallCount);
+        Assert.Equal(1, context.RunOnlineOperationWithBusyStateCallCount);
+        Assert.Equal("Last action: Submitted online move e2 to e4.", context.LastAction);
+        Assert.Equal(string.Empty, context.Feedback);
+        Assert.Equal(1, context.ClearSelectionCallCount);
+        Assert.Equal(1, context.RefreshBoardCallCount);
+    }
+
+    private static GameState CreateOnlineGameState(PieceColor sideToMove)
+    {
+        return new GameState(
+            Pieces:
+            [
+                new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+                new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)),
+                new PiecePlacement(new Square(4, 1), new Piece(PieceType.Pawn, PieceColor.White))
+            ],
+            SideToMove: sideToMove,
+            CastlingRights: CastlingRights.None,
+            EnPassantTarget: null,
+            HalfmoveClock: 0,
+            FullmoveNumber: 1,
+            Status: GameStatus.InProgress,
+            MoveHistory: []);
+    }
+
     private sealed class FakeOnlinePlayContext : IMainWindowOnlinePlayContext
     {
         public bool IsOnlineOperationInProgress { get; set; }
 
-        public GameState? DisplayGameState { get; set; }
+        public GameState? OnlineGameState { get; set; }
 
         public string Feedback { get; private set; } = string.Empty;
 
@@ -107,9 +182,9 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
 
         public int SetFocusedSquareToDefaultCallCount { get; private set; }
 
-        public GameState? GetDisplayGameState()
+        public GameState? GetOnlineGameState()
         {
-            return DisplayGameState;
+            return OnlineGameState;
         }
 
         public void SetFocusedSquare(Square square)
@@ -217,8 +292,10 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
         public long LastSequence { get; set; }
 
         public int CreateMatchCallCount { get; private set; }
+        public int SubmitMoveCallCount { get; private set; }
 
         public Func<CancellationToken, Task<OnlineOperationResult<OnlineCreatedMatch>>>? CreateMatchAsyncHandler { get; set; }
+        public Func<Square, Square, PieceType?, CancellationToken, Task<OnlineOperationResult<OnlineMatchSnapshot>>>? SubmitMoveAsyncHandler { get; set; }
 
         public Task<OnlineOperationResult<OnlineCreatedMatch>> CreateMatchAsync(CancellationToken cancellationToken = default)
         {
@@ -251,6 +328,12 @@ public sealed class MainWindowOnlinePlayCoordinatorTests
             PieceType? promotionPieceType = null,
             CancellationToken cancellationToken = default)
         {
+            SubmitMoveCallCount++;
+            if (SubmitMoveAsyncHandler is not null)
+            {
+                return SubmitMoveAsyncHandler(fromSquare, toSquare, promotionPieceType, cancellationToken);
+            }
+
             return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Failure(DefaultFailure));
         }
 

@@ -8,7 +8,7 @@ internal interface IMainWindowOnlinePlayContext
 {
     bool IsOnlineOperationInProgress { get; }
 
-    GameState? GetDisplayGameState();
+    GameState? GetOnlineGameState();
 
     void SetFocusedSquare(Square square);
 
