@@ -17,7 +17,7 @@ namespace Chess.Online;
 public sealed class MultiplayerServerOptions
 {
     public const string EndpointEnvironmentVariableName = "CHESS_MULTIPLAYER_SERVER_URL";
-    private const string DefaultEndpoint = "http://localhost:8080";
+    private const string DefaultEndpoint = "http://134.149.184.47:8080";
 
     public MultiplayerServerOptions(Uri baseUri)
     {

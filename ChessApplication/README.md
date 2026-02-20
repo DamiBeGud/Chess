@@ -15,10 +15,16 @@ The client integrates with `MultiplayerServer` HTTP + SignalR contracts (`/api/v
 Set the environment variable before starting the client:
 
 ```bash
-export CHESS_MULTIPLAYER_SERVER_URL=http://localhost:8080
+export CHESS_MULTIPLAYER_SERVER_URL=http://134.149.184.47:8080
 ```
 
-If unset, the client defaults to `http://localhost:8080`.
+If unset, the client defaults to `http://134.149.184.47:8080`.
+
+To force a local server during development, override:
+
+```bash
+export CHESS_MULTIPLAYER_SERVER_URL=http://localhost:8080
+```
 
 ### Local End-to-End
 
