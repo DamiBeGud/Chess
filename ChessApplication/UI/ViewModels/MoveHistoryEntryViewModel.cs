@@ -111,7 +111,17 @@ public sealed class MoveHistoryEntryViewModel
         var pieceToken = pieceType.ToString().ToLowerInvariant();
         var deterministicIconUri = new Uri($"{DeterministicIconAssetBasePath}/{colorToken}-{pieceToken}.png");
 
-        if (!AssetLoader.Exists(deterministicIconUri))
+        bool exists;
+        try
+        {
+            exists = AssetLoader.Exists(deterministicIconUri);
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+
+        if (!exists)
         {
             return null;
         }

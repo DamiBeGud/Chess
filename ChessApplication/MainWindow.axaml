@@ -189,7 +189,7 @@
                     BorderThickness="1"
                     CornerRadius="6"
                     Padding="12">
-                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,*"
+                <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,*"
                       RowSpacing="10">
                     <TextBlock Grid.Row="0"
                                Text="Game Panel"
@@ -264,6 +264,44 @@
 
                     <StackPanel Grid.Row="4"
                                 Spacing="6">
+                        <TextBlock Text="Online Multiplayer"
+                                   FontSize="14"
+                                   FontWeight="SemiBold" />
+                        <TextBox x:Name="OnlineJoinCodeTextBox"
+                                 Text="{Binding OnlineJoinCode}"
+                                 Watermark="Join code (6 chars)"
+                                 MinWidth="220" />
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="8">
+                            <Button x:Name="CreateOnlineMatchButton"
+                                    Grid.Column="0"
+                                    Content="Create Match"
+                                    Command="{Binding CreateOnlineMatchCommand}" />
+                            <Button x:Name="JoinOnlineMatchButton"
+                                    Grid.Column="1"
+                                    Content="Join Match"
+                                    Command="{Binding JoinOnlineMatchCommand}" />
+                        </Grid>
+                        <Grid ColumnDefinitions="*,*"
+                              ColumnSpacing="8">
+                            <Button x:Name="ResyncOnlineMatchButton"
+                                    Grid.Column="0"
+                                    Content="Resync"
+                                    Command="{Binding ResyncOnlineMatchCommand}" />
+                            <Button x:Name="LeaveOnlineMatchButton"
+                                    Grid.Column="1"
+                                    Content="Leave Match"
+                                    Command="{Binding LeaveOnlineMatchCommand}" />
+                        </Grid>
+                        <TextBlock x:Name="OnlineSessionTextBlock"
+                                   Text="{Binding OnlineSessionText}"
+                                   TextWrapping="Wrap"
+                                   FontSize="12"
+                                   Opacity="0.85" />
+                    </StackPanel>
+
+                    <StackPanel Grid.Row="5"
+                                Spacing="6">
                         <TextBlock Text="Save File"
                                    FontSize="14"
                                    FontWeight="SemiBold" />
@@ -284,12 +322,12 @@
                         </Grid>
                     </StackPanel>
 
-                    <TextBlock Grid.Row="5"
+                    <TextBlock Grid.Row="6"
                                Text="Move History"
                                FontSize="16"
                                FontWeight="SemiBold" />
 
-                    <Border Grid.Row="6"
+                    <Border Grid.Row="7"
                             BorderBrush="#D5C7B7"
                             BorderThickness="1"
                             CornerRadius="4"

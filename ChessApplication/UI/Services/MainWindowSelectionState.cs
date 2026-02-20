@@ -62,6 +62,13 @@ internal sealed class MainWindowSelectionState : IMainWindowSelectionState
         return _legalDestinationSquares.Count > 0;
     }
 
+    public void SelectSquareWithoutLegalDestinations(Square square)
+    {
+        _selectedSquare = square;
+        _hasMovedFocusSinceSelection = false;
+        _legalDestinationSquares.Clear();
+    }
+
     public void ClearSelection()
     {
         _selectedSquare = null;

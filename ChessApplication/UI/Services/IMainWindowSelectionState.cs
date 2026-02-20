@@ -13,6 +13,7 @@ internal interface IMainWindowSelectionState
     void SetFocusedSquare(Square square);
     void MoveFocusedSquare(int fileDelta, int rankDelta);
     bool SelectSquare(Square square, IReadOnlyList<Move> legalMoves);
+    void SelectSquareWithoutLegalDestinations(Square square);
     void ClearSelection();
     void ApplyHighlights(IReadOnlyList<BoardSquareViewModel> boardSquares, bool showLegalMoveSuggestions);
 }
