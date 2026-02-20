@@ -6,6 +6,9 @@ namespace Chess.AppCore;
 
 public interface IAiTurnService
 {
+    bool IsAvailable => true;
+
     bool CanRequestMove(PieceColor aiColor);
+
     Task<Move?> TryPlayTurnAsync(PieceColor aiColor, int searchDepth, CancellationToken cancellationToken = default);
 }

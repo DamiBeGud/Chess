@@ -19,7 +19,11 @@ using Chess.UI.Services;
 
 namespace Chess.UI.ViewModels;
 
-public sealed class MainWindowViewModel : INotifyPropertyChanged
+public sealed class MainWindowViewModel :
+    INotifyPropertyChanged,
+    IMainWindowLocalPlayContext,
+    IMainWindowOnlinePlayContext,
+    IMainWindowPersistenceContext
 {
     private static readonly Square DefaultKeyboardFocusSquare = new(4, 1);
     private static readonly IReadOnlyList<string> DefaultFileCoordinates = BuildFileCoordinates();
@@ -39,6 +43,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     private readonly IMainWindowKeyboardNavigator _keyboardNavigator;
     private readonly IMainWindowAiTurnCoordinator _aiTurnCoordinator;
     private readonly IOnlineMatchSessionService _onlineMatchSessionService;
+    private readonly IMainWindowLocalPlayCoordinator _localPlayCoordinator;
+    private readonly IMainWindowOnlinePlayCoordinator _onlinePlayCoordinator;
+    private readonly IMainWindowPersistenceCoordinator _persistenceCoordinator;
     private readonly IReadOnlyList<BoardSquareViewModel> _boardSquares;
     private readonly AsyncRelayCommand _createOnlineMatchCommand;
     private readonly AsyncRelayCommand _joinOnlineMatchCommand;
@@ -127,6 +134,33 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         IMainWindowKeyboardNavigator keyboardNavigator,
         IMainWindowAiTurnCoordinator aiTurnCoordinator,
         IOnlineMatchSessionService onlineMatchSessionService)
+        : this(
+            gameSessionService,
+            pieceAssetResolver,
+            aiTurnService,
+            selectionState,
+            textFormatter,
+            keyboardNavigator,
+            aiTurnCoordinator,
+            onlineMatchSessionService,
+            new MainWindowLocalPlayCoordinator(gameSessionService, selectionState, textFormatter),
+            new MainWindowOnlinePlayCoordinator(onlineMatchSessionService, selectionState, textFormatter),
+            new MainWindowPersistenceCoordinator(gameSessionService))
+    {
+    }
+
+    internal MainWindowViewModel(
+        IGameSessionService gameSessionService,
+        IPieceAssetResolver pieceAssetResolver,
+        IAiTurnService aiTurnService,
+        IMainWindowSelectionState selectionState,
+        IMainWindowTextFormatter textFormatter,
+        IMainWindowKeyboardNavigator keyboardNavigator,
+        IMainWindowAiTurnCoordinator aiTurnCoordinator,
+        IOnlineMatchSessionService onlineMatchSessionService,
+        IMainWindowLocalPlayCoordinator localPlayCoordinator,
+        IMainWindowOnlinePlayCoordinator onlinePlayCoordinator,
+        IMainWindowPersistenceCoordinator persistenceCoordinator)
     {
         ArgumentNullException.ThrowIfNull(gameSessionService);
         ArgumentNullException.ThrowIfNull(pieceAssetResolver);
@@ -136,6 +170,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         ArgumentNullException.ThrowIfNull(keyboardNavigator);
         ArgumentNullException.ThrowIfNull(aiTurnCoordinator);
         ArgumentNullException.ThrowIfNull(onlineMatchSessionService);
+        ArgumentNullException.ThrowIfNull(localPlayCoordinator);
+        ArgumentNullException.ThrowIfNull(onlinePlayCoordinator);
+        ArgumentNullException.ThrowIfNull(persistenceCoordinator);
 
         _gameSessionService = gameSessionService;
         _pieceAssetResolver = pieceAssetResolver;
@@ -145,6 +182,9 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         _keyboardNavigator = keyboardNavigator;
         _aiTurnCoordinator = aiTurnCoordinator;
         _onlineMatchSessionService = onlineMatchSessionService;
+        _localPlayCoordinator = localPlayCoordinator;
+        _onlinePlayCoordinator = onlinePlayCoordinator;
+        _persistenceCoordinator = persistenceCoordinator;
 
         var squares = BuildBoardSquares();
         _boardSquares = new ReadOnlyCollection<BoardSquareViewModel>(squares);
@@ -293,7 +333,7 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public bool IsAiThinking => _aiTurnCoordinator.IsAiTurnInProgress;
 
-    public bool IsAiAvailable => _aiTurnService is not NoOpAiTurnService && !IsOnlineMatchActive;
+    public bool IsAiAvailable => _aiTurnService.IsAvailable && !IsOnlineMatchActive;
 
     public bool IsOnlineMatchActive => _onlineMatchSessionService.IsInMatch;
 
@@ -453,69 +493,16 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     public async Task SaveGameAsync(CancellationToken cancellationToken = default)
     {
-        if (IsOnlineMatchActive)
-        {
-            FeedbackText = "Saving local files is disabled while an online match is active.";
-            return;
-        }
-
-        var filePath = PersistenceFilePath?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            FeedbackText = "Save file path is required.";
-            return;
-        }
-
-        try
-        {
-            await _gameSessionService.SaveAsync(filePath, cancellationToken);
-            LastActionText = $"Last action: Saved game to {filePath}.";
-            FeedbackText = string.Empty;
-        }
-        catch (Exception exception) when (
-            exception is InvalidDataException
-            or UnauthorizedAccessException
-            or IOException
-            or ArgumentException)
-        {
-            FeedbackText = $"Unable to save game: {exception.Message}";
-        }
+        await _persistenceCoordinator.SaveGameAsync(PersistenceFilePath, this, cancellationToken);
     }
 
     public async Task LoadGameAsync(CancellationToken cancellationToken = default)
     {
-        if (IsOnlineMatchActive)
-        {
-            FeedbackText = "Loading local files is disabled while an online match is active.";
-            return;
-        }
-
-        var filePath = PersistenceFilePath?.Trim() ?? string.Empty;
-        if (string.IsNullOrWhiteSpace(filePath))
-        {
-            FeedbackText = "Save file path is required.";
-            return;
-        }
-
-        try
-        {
-            _aiTurnCoordinator.CancelInFlightAiTurn();
-            await _gameSessionService.LoadAsync(filePath, cancellationToken);
-            ClearSelection();
-            SetFocusedSquare(DefaultKeyboardFocusSquare);
-            LastActionText = $"Last action: Loaded game from {filePath}.";
-            FeedbackText = string.Empty;
-            RefreshBoardFromCurrentState();
-            QueueAiTurnIfNeeded();
-        }
-        catch (Exception exception) when (
-            exception is InvalidDataException
-            or UnauthorizedAccessException
-            or IOException
-            or ArgumentException)
-        {
-            FeedbackText = $"Unable to load game: {exception.Message}";
-        }
+        await _persistenceCoordinator.LoadGameAsync(
+            PersistenceFilePath,
+            DefaultKeyboardFocusSquare,
+            this,
+            cancellationToken);
     }
 
     public bool HandleKeyboardInput(Key key)
@@ -563,192 +550,11 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
     {
         if (IsOnlineMatchActive)
         {
-            await OnOnlineSquareClickedAsync(square);
+            await _onlinePlayCoordinator.HandleSquareClickedAsync(square, this);
             return;
         }
 
-        OnLocalSquareClicked(square);
-    }
-
-    private void OnLocalSquareClicked(Square square)
-    {
-        SetFocusedSquare(square);
-        var currentState = _gameSessionService.CurrentGameState;
-
-        if (currentState.Status != GameStatus.InProgress)
-        {
-            FeedbackText = $"Game is finished ({currentState.Status}). Start a new game to continue.";
-            return;
-        }
-
-        if (IsHumanInputBlockedByAiTurn())
-        {
-            FeedbackText = BuildAiThinkingFeedback();
-            QueueAiTurnIfNeeded();
-            return;
-        }
-
-        if (_selectionState.SelectedSquare is null)
-        {
-            TrySelectSquare(square, currentState);
-            return;
-        }
-
-        var selectedSquare = _selectionState.SelectedSquare.Value;
-        if (selectedSquare == square)
-        {
-            ClearSelection();
-            FeedbackText = string.Empty;
-            return;
-        }
-
-        if (_selectionState.IsLegalDestination(square))
-        {
-            ExecuteMove(selectedSquare, square, currentState);
-            return;
-        }
-
-        if (TryGetPieceAt(currentState, square, out var pieceAtSquare) && pieceAtSquare!.Color == currentState.SideToMove)
-        {
-            SelectSquareAndSetFeedback(square);
-            return;
-        }
-
-        FeedbackText = _textFormatter.BuildInvalidMoveTargetFeedback(
-            square,
-            selectedSquare,
-            _selectionState.LegalDestinationSquares);
-    }
-
-    private async Task OnOnlineSquareClickedAsync(Square square)
-    {
-        SetFocusedSquare(square);
-
-        if (_isOnlineOperationInProgress)
-        {
-            return;
-        }
-
-        var currentState = GetDisplayGameState();
-        if (currentState is null)
-        {
-            FeedbackText = "Online state is not ready yet. Try resync.";
-            return;
-        }
-
-        if (currentState.Status != GameStatus.InProgress)
-        {
-            FeedbackText = $"Game is finished ({currentState.Status}). Leave the match to start a new one.";
-            return;
-        }
-
-        if (_onlineMatchSessionService.Seat is not PieceColor localSeat)
-        {
-            FeedbackText = "Online seat is unknown. Try reconnecting.";
-            return;
-        }
-
-        if (_selectionState.SelectedSquare is null)
-        {
-            if (!TryGetPieceAt(currentState, square, out var piece))
-            {
-                FeedbackText = _textFormatter.BuildNoPieceSelectionFeedback(square, localSeat);
-                return;
-            }
-
-            if (piece!.Color != localSeat)
-            {
-                FeedbackText = _textFormatter.BuildOpponentPieceSelectionFeedback(piece, square, localSeat);
-                return;
-            }
-
-            if (currentState.SideToMove != localSeat)
-            {
-                FeedbackText = "Waiting for opponent move.";
-                return;
-            }
-
-            _selectionState.SelectSquareWithoutLegalDestinations(square);
-            UpdateSquareHighlights();
-            FeedbackText = string.Empty;
-            return;
-        }
-
-        var selectedSquare = _selectionState.SelectedSquare.Value;
-        if (selectedSquare == square)
-        {
-            ClearSelection();
-            FeedbackText = string.Empty;
-            return;
-        }
-
-        await RunOnlineOperationWithBusyStateAsync(
-            async () =>
-            {
-                var submitResult = await _onlineMatchSessionService.SubmitMoveAsync(selectedSquare, square);
-                if (!submitResult.IsSuccess)
-                {
-                    FeedbackText = submitResult.Error?.Message ?? "Move submission failed.";
-                    return;
-                }
-
-                LastActionText = $"Last action: Submitted online move {_textFormatter.ToCoordinate(selectedSquare)} to {_textFormatter.ToCoordinate(square)}.";
-                FeedbackText = string.Empty;
-                ClearSelection();
-                RefreshBoardFromCurrentState();
-            });
-    }
-
-    private void TrySelectSquare(Square square, GameState currentState)
-    {
-        if (!TryGetPieceAt(currentState, square, out var piece))
-        {
-            FeedbackText = _textFormatter.BuildNoPieceSelectionFeedback(square, currentState.SideToMove);
-            return;
-        }
-
-        if (piece!.Color != currentState.SideToMove)
-        {
-            FeedbackText = _textFormatter.BuildOpponentPieceSelectionFeedback(piece, square, currentState.SideToMove);
-            return;
-        }
-
-        SelectSquareAndSetFeedback(square);
-    }
-
-    private void ExecuteMove(Square fromSquare, Square toSquare, GameState previousState)
-    {
-        if (_gameSessionService.TryMakeMove(fromSquare, toSquare))
-        {
-            PieceType? movedPieceType = TryGetPieceAt(previousState, fromSquare, out var movingPiece)
-                ? movingPiece!.Type
-                : null;
-            LastActionText = _textFormatter.BuildHumanMoveLastAction(previousState, fromSquare, toSquare, movedPieceType);
-            FeedbackText = string.Empty;
-        }
-        else
-        {
-            FeedbackText = _textFormatter.BuildMoveRejectedFeedback(fromSquare, toSquare);
-        }
-
-        ClearSelection();
-        RefreshBoardFromCurrentState();
-        QueueAiTurnIfNeeded();
-    }
-
-    private bool SelectSquare(Square square)
-    {
-        if (IsOnlineMatchActive)
-        {
-            _selectionState.SelectSquareWithoutLegalDestinations(square);
-            UpdateSquareHighlights();
-            return true;
-        }
-
-        var legalMoves = _gameSessionService.GetLegalMovesFrom(square);
-        var hasLegalMoves = _selectionState.SelectSquare(square, legalMoves);
-        UpdateSquareHighlights();
-        return hasLegalMoves;
+        _localPlayCoordinator.HandleSquareClicked(square, this);
     }
 
     private void ClearSelection()
@@ -829,14 +635,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         UpdateSquareHighlights();
     }
 
-    private void SelectSquareAndSetFeedback(Square square)
-    {
-        var hasLegalMoves = SelectSquare(square);
-        FeedbackText = hasLegalMoves
-            ? string.Empty
-            : _textFormatter.BuildNoLegalMovesFeedback(square);
-    }
-
     private bool BeginOnlineOperation()
     {
         if (_isOnlineOperationInProgress)
@@ -909,97 +707,22 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private Task CreateOnlineMatchAsync()
     {
-        return RunOnlineOperationWithBusyStateAsync(
-            async () =>
-            {
-                _aiTurnCoordinator.CancelInFlightAiTurn();
-                IsPlayVsAiEnabled = false;
-
-                var result = await _onlineMatchSessionService.CreateMatchAsync();
-                if (!result.IsSuccess)
-                {
-                    FeedbackText = result.Error?.Message ?? "Unable to create online match.";
-                    return;
-                }
-
-                var created = result.Value!;
-                LastActionText = $"Last action: Created online match {created.MatchId}. Share join code {created.JoinCode}.";
-                FeedbackText = string.Empty;
-                ClearSelection();
-                RefreshBoardFromCurrentState();
-                UpdateOnlineSessionText();
-                OnPropertyChanged(nameof(IsAiAvailable));
-            });
+        return _onlinePlayCoordinator.CreateOnlineMatchAsync(this);
     }
 
     private Task JoinOnlineMatchAsync()
     {
-        return RunOnlineOperationWithBusyStateAsync(
-            async () =>
-            {
-                var joinCode = OnlineJoinCode?.Trim() ?? string.Empty;
-                if (string.IsNullOrWhiteSpace(joinCode))
-                {
-                    FeedbackText = "Join code is required.";
-                    return;
-                }
-
-                _aiTurnCoordinator.CancelInFlightAiTurn();
-                IsPlayVsAiEnabled = false;
-
-                var result = await _onlineMatchSessionService.JoinMatchAsync(joinCode);
-                if (!result.IsSuccess)
-                {
-                    FeedbackText = result.Error?.Message ?? "Unable to join online match.";
-                    return;
-                }
-
-                var joined = result.Value!;
-                LastActionText = $"Last action: Joined online match {joined.MatchId} as {joined.Seat}.";
-                FeedbackText = string.Empty;
-                ClearSelection();
-                RefreshBoardFromCurrentState();
-                UpdateOnlineSessionText();
-                OnPropertyChanged(nameof(IsAiAvailable));
-            });
+        return _onlinePlayCoordinator.JoinOnlineMatchAsync(OnlineJoinCode, this);
     }
 
     private Task LeaveOnlineMatchAsync()
     {
-        return RunOnlineOperationWithBusyStateAsync(
-            async () =>
-            {
-                await _onlineMatchSessionService.LeaveMatchAsync();
-                _gameSessionService.StartNewGame();
-                ClearSelection();
-                SetFocusedSquare(DefaultKeyboardFocusSquare);
-                RefreshBoardFromCurrentState();
-                LastActionText = "Last action: Left online match and started a local game.";
-                FeedbackText = string.Empty;
-                UpdateOnlineSessionText();
-                OnPropertyChanged(nameof(IsOnlineMatchActive));
-                OnPropertyChanged(nameof(IsAiAvailable));
-            });
+        return _onlinePlayCoordinator.LeaveOnlineMatchAsync(this);
     }
 
     private Task ResyncOnlineMatchAsync()
     {
-        return RunOnlineOperationWithBusyStateAsync(
-            async () =>
-            {
-                var result = await _onlineMatchSessionService.RequestResyncAsync();
-                if (!result.IsSuccess)
-                {
-                    FeedbackText = result.Error?.Message ?? "Unable to resync online match.";
-                    return;
-                }
-
-                LastActionText = "Last action: Resynced online match state.";
-                FeedbackText = string.Empty;
-                ClearSelection();
-                RefreshBoardFromCurrentState();
-                UpdateOnlineSessionText();
-            });
+        return _onlinePlayCoordinator.ResyncOnlineMatchAsync(this);
     }
 
     private void OnOnlineSessionStateChanged(object? sender, EventArgs e)
@@ -1066,23 +789,6 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
             OnlineOperation.SubmitMove => $"Unable to submit online move. {detail}",
             _ => $"Online operation failed. {detail}"
         };
-    }
-
-    private static bool TryGetPieceAt(GameState gameState, Square square, out Piece? piece)
-    {
-        foreach (var placement in gameState.Pieces)
-        {
-            if (placement.Square != square)
-            {
-                continue;
-            }
-
-            piece = placement.Piece;
-            return true;
-        }
-
-        piece = null;
-        return false;
     }
 
     private static bool TryGetLastMoveSquares(IReadOnlyList<Move> moveHistory, out Square fromSquare, out Square toSquare)
@@ -1161,6 +867,165 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
         SubmitMove
     }
 
+    bool IMainWindowLocalPlayContext.IsHumanInputBlockedByAiTurn()
+    {
+        return IsHumanInputBlockedByAiTurn();
+    }
+
+    string IMainWindowLocalPlayContext.BuildAiThinkingFeedback()
+    {
+        return BuildAiThinkingFeedback();
+    }
+
+    void IMainWindowLocalPlayContext.QueueAiTurnIfNeeded()
+    {
+        QueueAiTurnIfNeeded();
+    }
+
+    void IMainWindowLocalPlayContext.SetFocusedSquare(Square square)
+    {
+        SetFocusedSquare(square);
+    }
+
+    void IMainWindowLocalPlayContext.SetFeedback(string feedback)
+    {
+        FeedbackText = feedback;
+    }
+
+    void IMainWindowLocalPlayContext.SetLastAction(string lastAction)
+    {
+        LastActionText = lastAction;
+    }
+
+    void IMainWindowLocalPlayContext.ClearSelection()
+    {
+        ClearSelection();
+    }
+
+    void IMainWindowLocalPlayContext.UpdateSquareHighlights()
+    {
+        UpdateSquareHighlights();
+    }
+
+    void IMainWindowLocalPlayContext.RefreshBoardFromCurrentState()
+    {
+        RefreshBoardFromCurrentState();
+    }
+
+    bool IMainWindowOnlinePlayContext.IsOnlineOperationInProgress => _isOnlineOperationInProgress;
+
+    GameState? IMainWindowOnlinePlayContext.GetDisplayGameState()
+    {
+        return GetDisplayGameState();
+    }
+
+    void IMainWindowOnlinePlayContext.SetFocusedSquare(Square square)
+    {
+        SetFocusedSquare(square);
+    }
+
+    void IMainWindowOnlinePlayContext.SetFeedback(string feedback)
+    {
+        FeedbackText = feedback;
+    }
+
+    void IMainWindowOnlinePlayContext.SetLastAction(string lastAction)
+    {
+        LastActionText = lastAction;
+    }
+
+    void IMainWindowOnlinePlayContext.ClearSelection()
+    {
+        ClearSelection();
+    }
+
+    void IMainWindowOnlinePlayContext.UpdateSquareHighlights()
+    {
+        UpdateSquareHighlights();
+    }
+
+    void IMainWindowOnlinePlayContext.RefreshBoardFromCurrentState()
+    {
+        RefreshBoardFromCurrentState();
+    }
+
+    Task IMainWindowOnlinePlayContext.RunOnlineOperationWithBusyStateAsync(Func<Task> operationAsync)
+    {
+        return RunOnlineOperationWithBusyStateAsync(operationAsync);
+    }
+
+    void IMainWindowOnlinePlayContext.CancelInFlightAiTurn()
+    {
+        _aiTurnCoordinator.CancelInFlightAiTurn();
+    }
+
+    void IMainWindowOnlinePlayContext.DisablePlayVsAi()
+    {
+        IsPlayVsAiEnabled = false;
+    }
+
+    void IMainWindowOnlinePlayContext.UpdateOnlineSessionText()
+    {
+        UpdateOnlineSessionText();
+    }
+
+    void IMainWindowOnlinePlayContext.NotifyAiAvailabilityChanged()
+    {
+        OnPropertyChanged(nameof(IsAiAvailable));
+    }
+
+    void IMainWindowOnlinePlayContext.NotifyOnlineMatchActiveChanged()
+    {
+        OnPropertyChanged(nameof(IsOnlineMatchActive));
+    }
+
+    void IMainWindowOnlinePlayContext.StartNewLocalGame()
+    {
+        _gameSessionService.StartNewGame();
+    }
+
+    void IMainWindowOnlinePlayContext.SetFocusedSquareToDefault()
+    {
+        SetFocusedSquare(DefaultKeyboardFocusSquare);
+    }
+
+    bool IMainWindowPersistenceContext.IsOnlineMatchActive => IsOnlineMatchActive;
+
+    void IMainWindowPersistenceContext.SetFeedback(string feedback)
+    {
+        FeedbackText = feedback;
+    }
+
+    void IMainWindowPersistenceContext.SetLastAction(string lastAction)
+    {
+        LastActionText = lastAction;
+    }
+
+    void IMainWindowPersistenceContext.CancelInFlightAiTurn()
+    {
+        _aiTurnCoordinator.CancelInFlightAiTurn();
+    }
+
+    void IMainWindowPersistenceContext.ClearSelection()
+    {
+        ClearSelection();
+    }
+
+    void IMainWindowPersistenceContext.SetFocusedSquare(Square square)
+    {
+        SetFocusedSquare(square);
+    }
+
+    void IMainWindowPersistenceContext.RefreshBoardFromCurrentState()
+    {
+        RefreshBoardFromCurrentState();
+    }
+
+    void IMainWindowPersistenceContext.QueueAiTurnIfNeeded()
+    {
+        QueueAiTurnIfNeeded();
+    }
+
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
@@ -1168,6 +1033,8 @@ public sealed class MainWindowViewModel : INotifyPropertyChanged
 
     private sealed class NoOpAiTurnService : IAiTurnService
     {
+        public bool IsAvailable => false;
+
         public bool CanRequestMove(PieceColor aiColor)
         {
             return false;
