@@ -7,6 +7,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Avalonia.Input;
 using Avalonia.Media;
+using Avalonia.Threading;
+using Avalonia.Headless.XUnit;
 using Chess.AI;
 using Chess.AppCore;
 using Chess.Domain;
@@ -667,7 +669,7 @@ public sealed class MainWindowViewModelTests
         Assert.False(viewModel.ResyncOnlineMatchCommand.CanExecute(null));
     }
 
-    [Fact]
+    [AvaloniaFact]
     public async Task CreateOnlineMatchCommand_WhenSessionStateChangedEventRaised_UpdatesOnlineStatusViaReadModelHook()
     {
         var onlineState = CreateState(
@@ -698,6 +700,87 @@ public sealed class MainWindowViewModelTests
 
         Assert.Equal("Online: White in match match-1 (connected). Join code: ABC123.", viewModel.OnlineSessionText);
         Assert.False(viewModel.IsAiAvailable);
+    }
+
+    [AvaloniaFact]
+    public async Task OnlineSessionError_FromBackgroundThread_IsMarshaledToUiThread()
+    {
+        var onlineService = new FakeOnlineMatchSessionService();
+        var viewModel = CreateOnlineViewModel(onlineService);
+        var feedbackChangedOnUiThreadTask = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName == nameof(MainWindowViewModel.FeedbackText))
+            {
+                feedbackChangedOnUiThreadTask.TrySetResult(Dispatcher.UIThread.CheckAccess());
+            }
+        };
+
+        await Task.Run(
+            () => onlineService.RaiseSessionError(
+                new OnlineUserError("transport_error", "Background event error.", OnlineUserAction.Retry)));
+
+        var changedOnUiThread = await WaitForTaskAsync(feedbackChangedOnUiThreadTask.Task);
+        Assert.True(changedOnUiThread);
+        Assert.Equal("Background event error.", viewModel.FeedbackText);
+    }
+
+    [AvaloniaFact]
+    public async Task OnlineSessionEvents_FromBackgroundThread_BurstRemainStableAndUiThreadBound()
+    {
+        var onlineState = CreateState(
+            GameStatus.InProgress,
+            PieceColor.White,
+            new PiecePlacement(new Square(4, 0), new Piece(PieceType.King, PieceColor.White)),
+            new PiecePlacement(new Square(4, 7), new Piece(PieceType.King, PieceColor.Black)));
+        var onlineService = new FakeOnlineMatchSessionService();
+        var viewModel = CreateOnlineViewModel(onlineService);
+        var threadAffinityViolation = 0;
+        var observedMutations = 0;
+        viewModel.PropertyChanged += (_, args) =>
+        {
+            if (args.PropertyName is nameof(MainWindowViewModel.OnlineSessionText) or nameof(MainWindowViewModel.FeedbackText))
+            {
+                Interlocked.Increment(ref observedMutations);
+                if (!Dispatcher.UIThread.CheckAccess())
+                {
+                    Interlocked.Exchange(ref threadAffinityViolation, 1);
+                }
+            }
+        };
+
+        const int eventCount = 40;
+        await Task.Run(
+            () =>
+            {
+                for (var index = 0; index < eventCount; index++)
+                {
+                    onlineService.IsInMatch = true;
+                    onlineService.IsConnected = index % 2 == 0;
+                    onlineService.MatchId = $"match-{index}";
+                    onlineService.JoinCode = $"JOIN{index:D2}";
+                    onlineService.Seat = PieceColor.White;
+                    onlineService.CurrentGameState = onlineState;
+                    onlineService.RaiseSessionStateChanged();
+                    onlineService.RaiseSessionError(
+                        new OnlineUserError(
+                            "transport_error",
+                            $"Background burst error {index}.",
+                            OnlineUserAction.Retry));
+                }
+            });
+
+        var finalIndex = eventCount - 1;
+        var finalConnection = finalIndex % 2 == 0 ? "connected" : "disconnected";
+        var expectedSessionText = $"Online: White in match match-{finalIndex} ({finalConnection}). Join code: JOIN{finalIndex:D2}.";
+
+        await WaitForConditionAsync(
+            () =>
+                string.Equals(viewModel.FeedbackText, $"Background burst error {finalIndex}.", StringComparison.Ordinal)
+                && string.Equals(viewModel.OnlineSessionText, expectedSessionText, StringComparison.Ordinal));
+
+        Assert.Equal(0, Volatile.Read(ref threadAffinityViolation));
+        Assert.True(Volatile.Read(ref observedMutations) > 0);
     }
 
     [Fact]
@@ -894,6 +977,17 @@ public sealed class MainWindowViewModelTests
 
             await Task.Delay(20);
         }
+    }
+
+    private static async Task<T> WaitForTaskAsync<T>(Task<T> task, int timeoutMilliseconds = 3000)
+    {
+        var completed = await Task.WhenAny(task, Task.Delay(timeoutMilliseconds));
+        if (!ReferenceEquals(completed, task))
+        {
+            throw new TimeoutException("Timed out waiting for expected task completion.");
+        }
+
+        return await task;
     }
 
     private sealed class StubGameSessionService : IGameSessionService

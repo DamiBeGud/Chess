@@ -62,6 +62,87 @@ public sealed class OnlineMatchSessionServiceTests
     }
 
     [Fact]
+    public async Task RealtimeBackgroundFailure_IsReportedThroughSessionError()
+    {
+        var snapshot = CreateSnapshot(moveNumber: 1, sideToMove: OnlineMatchProtocolConstants.CreatorSeat);
+        var getSnapshotCalls = 0;
+        var httpClient = new StubOnlineMatchHttpClient(
+            getSnapshot: (_, _) =>
+            {
+                getSnapshotCalls++;
+                if (getSnapshotCalls == 2)
+                {
+                    throw new InvalidOperationException("Simulated resync transport fault.");
+                }
+
+                return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Success(snapshot));
+            });
+        var realtimeClient = new FakeRealtimeClient();
+        await using var session = CreateSession(httpClient, realtimeClient);
+        var sessionErrorTask = new TaskCompletionSource<OnlineUserError>(TaskCreationOptions.RunContinuationsAsynchronously);
+        session.SessionError += (_, error) => sessionErrorTask.TrySetResult(error);
+
+        var resumeResult = await session.ResumeMatchAsync(
+            matchId: snapshot.MatchId,
+            playerToken: "e2ef01fdb8517a608fcf4862ef35f6a1",
+            seat: PieceColor.White);
+        Assert.True(resumeResult.IsSuccess);
+
+        realtimeClient.EmitUpdated(sequence: 1, snapshot with { MoveNumber = 2 });
+        realtimeClient.EmitUpdated(sequence: 3, snapshot with { MoveNumber = 3 });
+
+        var sessionError = await WaitForTaskAsync(sessionErrorTask.Task, TimeSpan.FromSeconds(3));
+        Assert.Equal("transport_error", sessionError.Code);
+        Assert.Equal("Realtime background synchronization failed.", sessionError.Message);
+        Assert.Equal(OnlineUserAction.Retry, sessionError.RecommendedAction);
+    }
+
+    [Fact]
+    public async Task RealtimeBackgroundFailure_DoesNotBlockFutureResyncOrCommands()
+    {
+        var snapshot = CreateSnapshot(moveNumber: 1, sideToMove: OnlineMatchProtocolConstants.CreatorSeat);
+        var getSnapshotCalls = 0;
+        var httpClient = new StubOnlineMatchHttpClient(
+            getSnapshot: (_, _) =>
+            {
+                getSnapshotCalls++;
+                if (getSnapshotCalls == 2)
+                {
+                    throw new InvalidOperationException("Simulated resync transport fault.");
+                }
+
+                return Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Success(snapshot));
+            });
+        var realtimeClient = new FakeRealtimeClient();
+        await using var session = CreateSession(httpClient, realtimeClient);
+        var sessionErrorCount = 0;
+        session.SessionError += (_, _) => Interlocked.Increment(ref sessionErrorCount);
+
+        var resumeResult = await session.ResumeMatchAsync(
+            matchId: snapshot.MatchId,
+            playerToken: "e2ef01fdb8517a608fcf4862ef35f6a1",
+            seat: PieceColor.White);
+        Assert.True(resumeResult.IsSuccess);
+
+        realtimeClient.EmitUpdated(sequence: 1, snapshot with { MoveNumber = 2 });
+        realtimeClient.EmitUpdated(sequence: 3, snapshot with { MoveNumber = 3 });
+
+        await WaitForConditionAsync(
+            () => Volatile.Read(ref sessionErrorCount) > 0,
+            timeout: TimeSpan.FromSeconds(3));
+
+        var baselineResyncCalls = realtimeClient.RequestResyncCalls;
+        realtimeClient.EmitUpdated(sequence: 5, snapshot with { MoveNumber = 4 });
+
+        await WaitForConditionAsync(
+            () => realtimeClient.RequestResyncCalls > baselineResyncCalls,
+            timeout: TimeSpan.FromSeconds(3));
+
+        var recoverResult = await WaitForTaskAsync(session.RecoverAsync(), TimeSpan.FromSeconds(3));
+        Assert.True(recoverResult.IsSuccess);
+    }
+
+    [Fact]
     public async Task SubmitMoveAsync_WithoutActiveSession_ReturnsSessionNotStartedError()
     {
         var httpClient = new StubOnlineMatchHttpClient();
@@ -150,6 +231,14 @@ public sealed class OnlineMatchSessionServiceTests
         }
 
         Assert.True(condition());
+    }
+
+    private static async Task<T> WaitForTaskAsync<T>(Task<T> task, TimeSpan timeout)
+    {
+        var timeoutTask = Task.Delay(timeout);
+        var completed = await Task.WhenAny(task, timeoutTask);
+        Assert.Same(task, completed);
+        return await task;
     }
 
     private sealed class StubOnlineMatchHttpClient : IOnlineMatchHttpClient

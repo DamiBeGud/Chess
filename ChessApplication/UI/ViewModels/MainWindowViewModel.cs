@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using Avalonia.Input;
+using Avalonia.Threading;
 using Chess.AppCore;
 using Chess.Domain;
 using Chess.Online;
@@ -770,17 +771,50 @@ public sealed class MainWindowViewModel :
 
     private void OnOnlineSessionStateChanged(object? sender, EventArgs e)
     {
-        RefreshBoardFromCurrentState();
-        UpdateOnlineSessionText();
-        OnPropertyChanged(nameof(IsOnlineMatchActive));
-        OnPropertyChanged(nameof(IsAiAvailable));
-        NotifyOnlineCommandCanExecuteChanged();
+        EnqueueOnlineUiUpdate(
+            () =>
+            {
+                RefreshBoardFromCurrentState();
+                UpdateOnlineSessionText();
+                OnPropertyChanged(nameof(IsOnlineMatchActive));
+                OnPropertyChanged(nameof(IsAiAvailable));
+                NotifyOnlineCommandCanExecuteChanged();
+            });
     }
 
     private void OnOnlineSessionError(object? sender, OnlineUserError error)
     {
-        FeedbackText = error.Message;
-        UpdateOnlineSessionText();
+        EnqueueOnlineUiUpdate(
+            () =>
+            {
+                FeedbackText = error.Message;
+                UpdateOnlineSessionText();
+            });
+    }
+
+    private static void EnqueueOnlineUiUpdate(Action uiUpdate)
+    {
+        ArgumentNullException.ThrowIfNull(uiUpdate);
+
+        if (Dispatcher.UIThread.CheckAccess())
+        {
+            uiUpdate();
+            return;
+        }
+
+        try
+        {
+            // Online session callbacks can be raised from SignalR/background threads.
+            Dispatcher.UIThread.Post(uiUpdate, DispatcherPriority.Normal);
+        }
+        catch (ObjectDisposedException)
+        {
+            // App is shutting down; ignore stale callbacks.
+        }
+        catch (InvalidOperationException)
+        {
+            // Dispatcher is no longer accepting work (teardown race).
+        }
     }
 
     private void UpdateOnlineSessionText()

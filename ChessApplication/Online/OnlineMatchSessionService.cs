@@ -7,6 +7,9 @@ namespace Chess.Online;
 
 public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
 {
+    private const string BackgroundFailureCode = "transport_error";
+    private const string BackgroundFailureMessage = "Realtime background synchronization failed.";
+
     private readonly IOnlineMatchTransportAdapter _transport;
     private readonly IOnlineErrorMapper _errorMapper;
     private readonly IOnlineRealtimeLifecycleManager _realtimeLifecycleManager;
@@ -336,32 +339,32 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
 
     private void OnSnapshotReceived(object? sender, OnlineMatchSnapshotSyncEvent payload)
     {
-        _ = HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot);
+        RunSafeBackground(() => HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot));
     }
 
     private void OnUpdatedReceived(object? sender, OnlineMatchUpdatedSyncEvent payload)
     {
-        _ = HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot);
+        RunSafeBackground(() => HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot));
     }
 
     private void OnPresenceChangedReceived(object? sender, OnlineMatchPresenceChangedSyncEvent payload)
     {
-        _ = HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot);
+        RunSafeBackground(() => HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot));
     }
 
     private void OnEndedReceived(object? sender, OnlineMatchEndedSyncEvent payload)
     {
-        _ = HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot);
+        RunSafeBackground(() => HandleSnapshotEventAsync(payload.Metadata.Sequence, payload.Snapshot));
     }
 
     private void OnErrorReceived(object? sender, OnlineMatchErrorSyncEvent payload)
     {
-        _ = HandleErrorEventAsync(payload.Metadata.Sequence, payload.Code, payload.Message);
+        RunSafeBackground(() => HandleErrorEventAsync(payload.Metadata.Sequence, payload.Code, payload.Message));
     }
 
     private void OnReconnected(object? sender, EventArgs e)
     {
-        _ = HandleReconnectedAsync();
+        RunSafeBackground(HandleReconnectedAsync);
     }
 
     private void OnDisconnected(object? sender, Exception? exception)
@@ -482,6 +485,42 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
                 _gate.Release();
             }
         }
+    }
+
+    private void RunSafeBackground(Func<Task> work)
+    {
+        _ = ExecuteSafeBackgroundAsync(work);
+    }
+
+    private async Task ExecuteSafeBackgroundAsync(Func<Task> work)
+    {
+        try
+        {
+            await work();
+        }
+        catch (OperationCanceledException)
+        {
+            // Realtime teardown may cancel background callbacks.
+        }
+        catch (ObjectDisposedException)
+        {
+            // Service teardown may race with in-flight background callbacks.
+        }
+        catch (Exception)
+        {
+            try
+            {
+                NotifyError(CreateBackgroundFailureError());
+            }
+            catch (Exception)
+            {
+            }
+        }
+    }
+
+    private OnlineUserError CreateBackgroundFailureError()
+    {
+        return _errorMapper.Map(new OnlineTransportError(BackgroundFailureCode, BackgroundFailureMessage));
     }
 
     private static OnlineUserError CreateSessionNotStartedError()
