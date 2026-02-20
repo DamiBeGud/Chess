@@ -6,6 +6,18 @@ using Chess.Domain;
 
 namespace Chess.Engine;
 
+/// <summary>
+/// ChessGameEngine is a concrete type within the Engine module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include App (AppShell).
+/// Key collaborators are ChessGameEngineOptions, generation, move, attack, None, GameAlreadyEnded.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Callers invoke it during legal move generation, move application, attack evaluation, and game-status checks inside the engine pipeline.</para>
+/// <para><b>Dependencies/Collaborators:</b> ChessGameEngineOptions, generation, move, attack, None, GameAlreadyEnded.</para>
+/// <para><b>Boundary:</b> This type sits in the rules engine boundary and participates in move evaluation or state transition logic.</para>
+/// </remarks>
 public sealed class ChessGameEngine : IGameEngine
 {
     private const string EventMoveRejected = "MoveRejected";
@@ -152,6 +164,18 @@ public sealed class ChessGameEngine : IGameEngine
         return ChessAttackDetector.IsKingInCheck(board, color);
     }
 
+    /// <summary>
+    /// MoveLookupFailureReason is an enumeration within the Engine module.
+    /// Its named values model a bounded set of states, options, or outcomes used by collaborators.
+    /// Primary production consumers include ChessGameEngine (Engine).
+    /// Its values are interpreted by the services and models listed in the Used by section.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Used by:</b> ChessGameEngine (Engine)</para>
+    /// <para><b>Usage pattern:</b> Callers invoke it during legal move generation, move application, attack evaluation, and game-status checks inside the engine pipeline.</para>
+    /// <para><b>Dependencies/Collaborators:</b> Its values are interpreted by the services and models listed in the Used by section.</para>
+    /// <para><b>Boundary:</b> This type sits in the rules engine boundary and participates in move evaluation or state transition logic.</para>
+    /// </remarks>
     private enum MoveLookupFailureReason
     {
         None = 0,

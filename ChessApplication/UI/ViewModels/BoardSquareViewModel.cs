@@ -9,6 +9,18 @@ using Chess.UI.Assets;
 
 namespace Chess.UI.ViewModels;
 
+/// <summary>
+/// BoardSquareViewModel is a concrete type within the UI/ViewModels module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include MainWindowViewModel (UI/ViewModels), MainWindow (AppShell), MainWindowSelectionState (UI/Services).
+/// Key collaborators are Square, ICommand, IPieceAssetResolver, INotifyPropertyChanged.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> MainWindowViewModel (UI/ViewModels), MainWindow (AppShell), MainWindowSelectionState (UI/Services), IMainWindowSelectionState (UI/Services)</para>
+/// <para><b>Usage pattern:</b> Avalonia bindings read from this type and invoke its commands; it then coordinates downstream services and updates presentation state.</para>
+/// <para><b>Dependencies/Collaborators:</b> Square, ICommand, IPieceAssetResolver, INotifyPropertyChanged.</para>
+/// <para><b>Boundary:</b> This type sits in the UI/ViewModels UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+/// </remarks>
 public sealed class BoardSquareViewModel : INotifyPropertyChanged
 {
     private static readonly IBrush LightSquareBrush = Brush.Parse("#F2E4CB");

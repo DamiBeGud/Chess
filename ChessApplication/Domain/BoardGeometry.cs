@@ -3,6 +3,18 @@ using System.Collections.Generic;
 
 namespace Chess.Domain;
 
+/// <summary>
+/// BoardGeometry is a concrete type within the Domain module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include ChessMoveGenerator (Engine), ChessAttackDetector (Engine), OnlineMatchTransportAdapter (Online).
+/// No constructor-injected collaborators were detected in this declaration.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> ChessMoveGenerator (Engine), ChessAttackDetector (Engine), OnlineMatchTransportAdapter (Online), ChessEngineBoard (Engine)</para>
+/// <para><b>Usage pattern:</b> Values are created or transformed by engine/application services, then propagated through persistence, online, and UI workflows as immutable state.</para>
+/// <para><b>Dependencies/Collaborators:</b> No constructor-injected collaborators were detected in this declaration.</para>
+/// <para><b>Boundary:</b> This type sits in the chess domain model boundary and represents rule-level concepts.</para>
+/// </remarks>
 public static class BoardGeometry
 {
     public const int BoardSize = 8;

@@ -20,6 +20,18 @@ using Chess.UI.Services;
 
 namespace Chess.UI.ViewModels;
 
+/// <summary>
+/// MainWindowViewModel is a concrete type within the UI/ViewModels module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include MainWindow (AppShell), App (AppShell).
+/// Key collaborators are IGameSessionService, IAiTurnService, IPieceAssetResolver, IOnlineMatchSessionService, IOnlineMatchSessionReadModel, IOnlineMatchSessionCommands.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> MainWindow (AppShell), App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Avalonia bindings read from this type and invoke its commands; it then coordinates downstream services and updates presentation state.</para>
+/// <para><b>Dependencies/Collaborators:</b> IGameSessionService, IAiTurnService, IPieceAssetResolver, IOnlineMatchSessionService, IOnlineMatchSessionReadModel, IOnlineMatchSessionCommands.</para>
+/// <para><b>Boundary:</b> This type sits in the UI/ViewModels UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+/// </remarks>
 public sealed class MainWindowViewModel :
     INotifyPropertyChanged,
     IDisposable,
@@ -957,6 +969,18 @@ public sealed class MainWindowViewModel :
         return ((7 - square.Rank) * 8) + square.File;
     }
 
+    /// <summary>
+    /// OnlineOperation is an enumeration within the UI/ViewModels module.
+    /// Its named values model a bounded set of states, options, or outcomes used by collaborators.
+    /// Primary production consumers include MainWindowViewModel (UI/ViewModels).
+    /// Its values are interpreted by the services and models listed in the Used by section.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Used by:</b> MainWindowViewModel (UI/ViewModels)</para>
+    /// <para><b>Usage pattern:</b> Avalonia bindings read from this type and invoke its commands; it then coordinates downstream services and updates presentation state.</para>
+    /// <para><b>Dependencies/Collaborators:</b> Its values are interpreted by the services and models listed in the Used by section.</para>
+    /// <para><b>Boundary:</b> This type sits in the UI/ViewModels UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+    /// </remarks>
     private enum OnlineOperation
     {
         CreateMatch,
@@ -1129,6 +1153,18 @@ public sealed class MainWindowViewModel :
 
     private bool IsDisposed => Volatile.Read(ref _disposeState) != 0;
 
+    /// <summary>
+    /// NoOpAiTurnService is a concrete type within the UI/ViewModels module.
+    /// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+    /// Primary production consumers include MainWindowViewModel (UI/ViewModels).
+    /// Key collaborators are Instance, IAiTurnService.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Used by:</b> MainWindowViewModel (UI/ViewModels)</para>
+    /// <para><b>Usage pattern:</b> Avalonia bindings read from this type and invoke its commands; it then coordinates downstream services and updates presentation state.</para>
+    /// <para><b>Dependencies/Collaborators:</b> Instance, IAiTurnService.</para>
+    /// <para><b>Boundary:</b> This type sits in the UI/ViewModels UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+    /// </remarks>
     private sealed class NoOpAiTurnService : IAiTurnService
     {
         public bool IsAvailable => false;

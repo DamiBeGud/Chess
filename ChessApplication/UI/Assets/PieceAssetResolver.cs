@@ -4,6 +4,18 @@ using Chess.Domain;
 
 namespace Chess.UI.Assets;
 
+/// <summary>
+/// PieceAssetResolver is a concrete type within the UI/Assets module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include MainWindowViewModel (UI/ViewModels), App (AppShell).
+/// Key collaborators are IImage, IPieceAssetUriStrategy, IPieceAssetCache, IPieceAssetImageLoader, IPieceAssetResolver.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> MainWindowViewModel (UI/ViewModels), App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Presentation components call this type while resolving, parsing, caching, and rendering piece-related visual assets.</para>
+/// <para><b>Dependencies/Collaborators:</b> IImage, IPieceAssetUriStrategy, IPieceAssetCache, IPieceAssetImageLoader, IPieceAssetResolver.</para>
+/// <para><b>Boundary:</b> This type sits in the UI/Assets UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+/// </remarks>
 public sealed class PieceAssetResolver : IPieceAssetResolver
 {
     private readonly IPieceAssetUriStrategy _uriStrategy;

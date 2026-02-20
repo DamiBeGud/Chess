@@ -3,6 +3,18 @@ using Chess.Domain;
 
 namespace Chess.Online;
 
+/// <summary>
+/// OnlineSessionStateCoordinator is a concrete type within the Online module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include OnlineMatchSessionService (Online).
+/// Key collaborators are IOnlineSnapshotGameStateMapper, OnlineRealtimeEventReducer.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> OnlineMatchSessionService (Online)</para>
+/// <para><b>Usage pattern:</b> Online coordinators and services call it along create/join/resume/submit/resync flows and realtime callback handling.</para>
+/// <para><b>Dependencies/Collaborators:</b> IOnlineSnapshotGameStateMapper, OnlineRealtimeEventReducer.</para>
+/// <para><b>Boundary:</b> This type sits in the online multiplayer boundary and supports transport, session, or realtime synchronization flows.</para>
+/// </remarks>
 internal sealed class OnlineSessionStateCoordinator
 {
     private readonly IOnlineSnapshotGameStateMapper _snapshotMapper;

@@ -6,6 +6,18 @@ using Chess.Domain;
 
 namespace Chess.AppCore;
 
+/// <summary>
+/// AiTurnService is a concrete type within the Application module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include App (AppShell).
+/// Key collaborators are IGameSessionService, IAiMoveSelector, IAiTurnService.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> App (AppShell)</para>
+/// <para><b>Usage pattern:</b> The UI layer triggers this service per user action, and the service delegates to engine/persistence collaborators to complete the operation.</para>
+/// <para><b>Dependencies/Collaborators:</b> IGameSessionService, IAiMoveSelector, IAiTurnService.</para>
+/// <para><b>Boundary:</b> This type sits in the application-service boundary and orchestrates domain operations for callers.</para>
+/// </remarks>
 public sealed class AiTurnService : IAiTurnService
 {
     private readonly IGameSessionService _gameSessionService;

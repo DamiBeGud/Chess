@@ -5,6 +5,18 @@ using Chess.Domain;
 
 namespace Chess.Engine;
 
+/// <summary>
+/// ChessGameStatusEvaluator is a concrete type within the Engine module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include ChessStateTransitionService (Engine), ChessGameEngine (Engine).
+/// Key collaborators are Move, string.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> ChessStateTransitionService (Engine), ChessGameEngine (Engine)</para>
+/// <para><b>Usage pattern:</b> Callers invoke it during legal move generation, move application, attack evaluation, and game-status checks inside the engine pipeline.</para>
+/// <para><b>Dependencies/Collaborators:</b> Move, string.</para>
+/// <para><b>Boundary:</b> This type sits in the rules engine boundary and participates in move evaluation or state transition logic.</para>
+/// </remarks>
 internal sealed class ChessGameStatusEvaluator
 {
     private readonly Func<GameState, IReadOnlyDictionary<Square, Piece>, IReadOnlyList<Move>> _generateLegalMoves;

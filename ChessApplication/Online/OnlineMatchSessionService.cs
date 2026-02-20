@@ -5,6 +5,18 @@ using Chess.Domain;
 
 namespace Chess.Online;
 
+/// <summary>
+/// OnlineMatchSessionService is a concrete type within the Online module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include App (AppShell).
+/// Key collaborators are IOnlineMatchHttpClient, IOnlineErrorMapper, IOnlineMatchRealtimeClientFactory, IOnlineSnapshotGameStateMapper, OnlineRealtimeEventReducer, IOnlineMatchTransportAdapter.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Online coordinators and services call it along create/join/resume/submit/resync flows and realtime callback handling.</para>
+/// <para><b>Dependencies/Collaborators:</b> IOnlineMatchHttpClient, IOnlineErrorMapper, IOnlineMatchRealtimeClientFactory, IOnlineSnapshotGameStateMapper, OnlineRealtimeEventReducer, IOnlineMatchTransportAdapter.</para>
+/// <para><b>Boundary:</b> This type sits in the online multiplayer boundary and supports transport, session, or realtime synchronization flows.</para>
+/// </remarks>
 public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
 {
     private const string BackgroundFailureCode = "transport_error";

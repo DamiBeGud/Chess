@@ -1,5 +1,17 @@
 namespace Chess.Online;
 
+/// <summary>
+/// OnlineMatchProtocolConstants is a concrete type within the Online module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include OnlineErrorMapper (Online), OnlineSnapshotGameStateMapper (Online), SignalROnlineMatchRealtimeClient (Online).
+/// No constructor-injected collaborators were detected in this declaration.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> OnlineErrorMapper (Online), OnlineSnapshotGameStateMapper (Online), SignalROnlineMatchRealtimeClient (Online), MultiplayerServerHttpClient (Online)</para>
+/// <para><b>Usage pattern:</b> Online coordinators and services call it along create/join/resume/submit/resync flows and realtime callback handling.</para>
+/// <para><b>Dependencies/Collaborators:</b> No constructor-injected collaborators were detected in this declaration.</para>
+/// <para><b>Boundary:</b> This type sits in the online multiplayer boundary and supports transport, session, or realtime synchronization flows.</para>
+/// </remarks>
 public static class OnlineMatchProtocolConstants
 {
     public const string MatchesRoute = "/api/v1/matches";

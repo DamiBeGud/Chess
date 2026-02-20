@@ -4,6 +4,18 @@ using Chess.Engine;
 
 namespace Chess.AI;
 
+/// <summary>
+/// MaterialMobilityPositionEvaluator is a concrete type within the AI module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include App (AppShell).
+/// Key collaborators are IGameEngine, IAiPositionEvaluator.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Startup code constructs and wires this type during application initialization and desktop-lifetime setup.</para>
+/// <para><b>Dependencies/Collaborators:</b> IGameEngine, IAiPositionEvaluator.</para>
+/// <para><b>Boundary:</b> This type sits in the application shell boundary and participates in startup or desktop lifetime wiring.</para>
+/// </remarks>
 public sealed class MaterialMobilityPositionEvaluator : IAiPositionEvaluator
 {
     private readonly IGameEngine _gameEngine;

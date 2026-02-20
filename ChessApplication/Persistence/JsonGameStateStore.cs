@@ -8,6 +8,18 @@ using Chess.Domain;
 
 namespace Chess.Persistence;
 
+/// <summary>
+/// JsonGameStateStore is a concrete type within the Persistence module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include App (AppShell).
+/// Key collaborators are IGameStateStore.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> App (AppShell)</para>
+/// <para><b>Usage pattern:</b> Application services call it on save/load paths to convert between persisted payloads and runtime game state.</para>
+/// <para><b>Dependencies/Collaborators:</b> IGameStateStore.</para>
+/// <para><b>Boundary:</b> This type sits in the persistence boundary and handles serialization or storage-oriented contracts.</para>
+/// </remarks>
 public sealed class JsonGameStateStore : IGameStateStore
 {
     private const int SupportedSchemaVersion = 2;

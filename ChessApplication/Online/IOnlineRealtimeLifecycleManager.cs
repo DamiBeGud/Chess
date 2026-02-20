@@ -4,6 +4,18 @@ using System.Threading.Tasks;
 
 namespace Chess.Online;
 
+/// <summary>
+/// IOnlineRealtimeLifecycleManager defines a contract within the Online module.
+/// It declares member signatures that decouple callers from implementation details.
+/// Primary production consumers include OnlineMatchSessionService (Online), OnlineRealtimeLifecycleManager (Online).
+/// Key collaborators are Implementations include OnlineRealtimeLifecycleManager (Online); related base contracts include IAsyncDisposable.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> OnlineMatchSessionService (Online), OnlineRealtimeLifecycleManager (Online)</para>
+/// <para><b>Usage pattern:</b> Online coordinators and services call it along create/join/resume/submit/resync flows and realtime callback handling.</para>
+/// <para><b>Dependencies/Collaborators:</b> Implementations include OnlineRealtimeLifecycleManager (Online); related base contracts include IAsyncDisposable.</para>
+/// <para><b>Boundary:</b> This type sits in the online multiplayer boundary and supports transport, session, or realtime synchronization flows.</para>
+/// </remarks>
 internal interface IOnlineRealtimeLifecycleManager : IAsyncDisposable
 {
     event EventHandler<OnlineMatchSnapshotSyncEvent>? SnapshotReceived;

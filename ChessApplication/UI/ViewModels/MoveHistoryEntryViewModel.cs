@@ -8,6 +8,18 @@ using Chess.UI.Assets;
 
 namespace Chess.UI.ViewModels;
 
+/// <summary>
+/// MoveHistoryEntryViewModel is a concrete type within the UI/ViewModels module.
+/// It encapsulates module-specific behavior and exposes operations consumed by adjacent layers.
+/// Primary production consumers include MainWindowTextFormatter (UI/Services), MainWindowViewModel (UI/ViewModels), IMainWindowTextFormatter (UI/Services).
+/// Key collaborators are string, PieceType, PieceColor, ResolvedPieceAsset.
+/// </summary>
+/// <remarks>
+/// <para><b>Used by:</b> MainWindowTextFormatter (UI/Services), MainWindowViewModel (UI/ViewModels), IMainWindowTextFormatter (UI/Services)</para>
+/// <para><b>Usage pattern:</b> Avalonia bindings read from this type and invoke its commands; it then coordinates downstream services and updates presentation state.</para>
+/// <para><b>Dependencies/Collaborators:</b> string, PieceType, PieceColor, ResolvedPieceAsset.</para>
+/// <para><b>Boundary:</b> This type sits in the UI/ViewModels UI boundary and supports presentation, interaction, or view-facing coordination.</para>
+/// </remarks>
 public sealed class MoveHistoryEntryViewModel
 {
     private const string DeterministicIconAssetBasePath = "avares://Chess/Assets/Pieces/ClassicOutline";
