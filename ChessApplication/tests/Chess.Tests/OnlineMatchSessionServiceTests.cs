@@ -61,6 +61,43 @@ public sealed class OnlineMatchSessionServiceTests
             timeout: TimeSpan.FromSeconds(3));
     }
 
+    [Fact]
+    public async Task SubmitMoveAsync_WithoutActiveSession_ReturnsSessionNotStartedError()
+    {
+        var httpClient = new StubOnlineMatchHttpClient();
+        var realtimeClient = new FakeRealtimeClient();
+        await using var session = CreateSession(httpClient, realtimeClient);
+
+        var result = await session.SubmitMoveAsync(new Square(4, 1), new Square(4, 3));
+
+        Assert.False(result.IsSuccess);
+        Assert.NotNull(result.Error);
+        Assert.Equal("session_not_started", result.Error!.Code);
+    }
+
+    [Fact]
+    public async Task LeaveMatchAsync_WhenConnected_ResetsRealtimeLifecycleDeterministically()
+    {
+        var snapshot = CreateSnapshot(moveNumber: 1, sideToMove: OnlineMatchProtocolConstants.CreatorSeat);
+        var httpClient = new StubOnlineMatchHttpClient(
+            getSnapshot: (_, _) => Task.FromResult(OnlineOperationResult<OnlineMatchSnapshot>.Success(snapshot)));
+        var realtimeClient = new FakeRealtimeClient();
+        await using var session = CreateSession(httpClient, realtimeClient);
+
+        var resumeResult = await session.ResumeMatchAsync(
+            matchId: snapshot.MatchId,
+            playerToken: "e2ef01fdb8517a608fcf4862ef35f6a1",
+            seat: PieceColor.White);
+        Assert.True(resumeResult.IsSuccess);
+
+        await session.LeaveMatchAsync();
+
+        Assert.False(session.IsInMatch);
+        Assert.Equal(1, realtimeClient.UnsubscribeCalls);
+        Assert.Equal(1, realtimeClient.DisconnectCalls);
+        Assert.Equal(1, realtimeClient.DisposeCalls);
+    }
+
     private static OnlineMatchSessionService CreateSession(
         StubOnlineMatchHttpClient httpClient,
         FakeRealtimeClient realtimeClient)
@@ -194,6 +231,7 @@ public sealed class OnlineMatchSessionServiceTests
         public int RequestResyncCalls { get; private set; }
         public int UnsubscribeCalls { get; private set; }
         public int DisconnectCalls { get; private set; }
+        public int DisposeCalls { get; private set; }
 
         public Task ConnectAsync(string playerToken, CancellationToken cancellationToken = default)
         {
@@ -230,6 +268,7 @@ public sealed class OnlineMatchSessionServiceTests
 
         public ValueTask DisposeAsync()
         {
+            DisposeCalls++;
             return ValueTask.CompletedTask;
         }
 

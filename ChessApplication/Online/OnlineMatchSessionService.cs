@@ -2,24 +2,16 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Chess.Domain;
-using Microsoft.AspNetCore.SignalR;
 
 namespace Chess.Online;
 
 public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
 {
-    private readonly IOnlineMatchHttpClient _httpClient;
+    private readonly IOnlineMatchTransportAdapter _transport;
     private readonly IOnlineErrorMapper _errorMapper;
-    private readonly IOnlineMatchRealtimeClientFactory _realtimeClientFactory;
-    private readonly IOnlineSnapshotGameStateMapper _snapshotMapper;
-    private readonly OnlineRealtimeEventReducer _reducer;
+    private readonly IOnlineRealtimeLifecycleManager _realtimeLifecycleManager;
+    private readonly OnlineSessionStateCoordinator _sessionState;
     private readonly SemaphoreSlim _gate = new(1, 1);
-
-    private IOnlineMatchRealtimeClient? _realtimeClient;
-    private OnlineMatchCredentials? _credentials;
-    private string? _joinCode;
-    private bool _isResyncInFlight;
-    private long _lastSequence;
 
     public OnlineMatchSessionService(
         IOnlineMatchHttpClient httpClient,
@@ -27,25 +19,39 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         IOnlineMatchRealtimeClientFactory realtimeClientFactory,
         IOnlineSnapshotGameStateMapper snapshotMapper,
         OnlineRealtimeEventReducer reducer)
+        : this(
+            new OnlineMatchTransportAdapter(httpClient),
+            errorMapper,
+            new OnlineRealtimeLifecycleManager(realtimeClientFactory, new OnlineTransportErrorPolicy(errorMapper)),
+            new OnlineSessionStateCoordinator(snapshotMapper, reducer))
     {
-        _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+    }
+
+    internal OnlineMatchSessionService(
+        IOnlineMatchTransportAdapter transport,
+        IOnlineErrorMapper errorMapper,
+        IOnlineRealtimeLifecycleManager realtimeLifecycleManager,
+        OnlineSessionStateCoordinator sessionState)
+    {
+        _transport = transport ?? throw new ArgumentNullException(nameof(transport));
         _errorMapper = errorMapper ?? throw new ArgumentNullException(nameof(errorMapper));
-        _realtimeClientFactory = realtimeClientFactory ?? throw new ArgumentNullException(nameof(realtimeClientFactory));
-        _snapshotMapper = snapshotMapper ?? throw new ArgumentNullException(nameof(snapshotMapper));
-        _reducer = reducer ?? throw new ArgumentNullException(nameof(reducer));
+        _realtimeLifecycleManager = realtimeLifecycleManager ?? throw new ArgumentNullException(nameof(realtimeLifecycleManager));
+        _sessionState = sessionState ?? throw new ArgumentNullException(nameof(sessionState));
+
+        AttachRealtimeHandlers();
     }
 
     public event EventHandler? SessionStateChanged;
     public event EventHandler<OnlineUserError>? SessionError;
 
-    public bool IsInMatch => _credentials is not null;
-    public bool IsConnected => _realtimeClient?.IsConnected is true;
-    public string? MatchId => _credentials?.MatchId;
-    public string? JoinCode => _joinCode;
-    public PieceColor? Seat => _credentials?.Seat;
-    public OnlineMatchSnapshot? CurrentSnapshot { get; private set; }
-    public GameState? CurrentGameState { get; private set; }
-    public long LastSequence => _lastSequence;
+    public bool IsInMatch => _sessionState.Credentials is not null;
+    public bool IsConnected => _realtimeLifecycleManager.IsConnected;
+    public string? MatchId => _sessionState.Credentials?.MatchId;
+    public string? JoinCode => _sessionState.JoinCode;
+    public PieceColor? Seat => _sessionState.Credentials?.Seat;
+    public OnlineMatchSnapshot? CurrentSnapshot => _sessionState.CurrentSnapshot;
+    public GameState? CurrentGameState => _sessionState.CurrentGameState;
+    public long LastSequence => _sessionState.LastSequence;
 
     public async Task<OnlineOperationResult<OnlineCreatedMatch>> CreateMatchAsync(CancellationToken cancellationToken = default)
     {
@@ -54,15 +60,14 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         {
             await ResetSessionInternalAsync(cancellationToken);
 
-            var createResult = await _httpClient.CreateMatchAsync(cancellationToken);
+            var createResult = await _transport.CreateMatchAsync(cancellationToken);
             if (!createResult.IsSuccess)
             {
                 return OnlineOperationResult<OnlineCreatedMatch>.Failure(createResult.Error!);
             }
 
             var created = createResult.Value!;
-            _credentials = new OnlineMatchCredentials(created.MatchId, created.CreatorToken, PieceColor.White);
-            _joinCode = created.JoinCode;
+            _sessionState.SetCreatedCredentials(created);
 
             var recoverResult = await RecoverInternalAsync(cancellationToken);
             if (!recoverResult.IsSuccess)
@@ -89,14 +94,14 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         {
             await ResetSessionInternalAsync(cancellationToken);
 
-            var joinResult = await _httpClient.JoinMatchAsync(joinCode, cancellationToken);
+            var joinResult = await _transport.JoinMatchAsync(joinCode, cancellationToken);
             if (!joinResult.IsSuccess)
             {
                 return OnlineOperationResult<OnlineJoinedMatch>.Failure(joinResult.Error!);
             }
 
             var joined = joinResult.Value!;
-            if (!TryParseSeat(joined.Seat, out var seat))
+            if (!_sessionState.TrySetJoinedCredentials(joined, out var seat))
             {
                 return OnlineOperationResult<OnlineJoinedMatch>.Failure(
                     new OnlineUserError(
@@ -105,9 +110,6 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
                         OnlineUserAction.StartNewMatch,
                         IsTerminal: true));
             }
-
-            _credentials = new OnlineMatchCredentials(joined.MatchId, joined.PlayerToken, seat);
-            _joinCode = null;
 
             var recoverResult = await RecoverInternalAsync(cancellationToken);
             if (!recoverResult.IsSuccess)
@@ -144,8 +146,7 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
                         OnlineUserAction.Retry));
             }
 
-            _credentials = new OnlineMatchCredentials(matchId.Trim(), playerToken.Trim(), seat);
-            _joinCode = null;
+            _sessionState.SetResumedCredentials(matchId.Trim(), playerToken.Trim(), seat);
 
             var recoverResult = await RecoverInternalAsync(cancellationToken);
             if (!recoverResult.IsSuccess)
@@ -171,18 +172,16 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (_credentials is null)
+            if (_sessionState.Credentials is not OnlineMatchCredentials credentials)
             {
                 return OnlineOperationResult<OnlineMatchSnapshot>.Failure(CreateSessionNotStartedError());
             }
 
-            var moveResult = await _httpClient.SubmitMoveAsync(
-                new OnlineSubmitMoveRequest(
-                    _credentials.MatchId,
-                    _credentials.PlayerToken,
-                    ToCoordinate(fromSquare),
-                    ToCoordinate(toSquare),
-                    ToPromotionToken(promotionPieceType)),
+            var moveResult = await _transport.SubmitMoveAsync(
+                credentials,
+                fromSquare,
+                toSquare,
+                promotionPieceType,
                 cancellationToken);
             if (!moveResult.IsSuccess)
             {
@@ -190,7 +189,7 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
             }
 
             var snapshot = moveResult.Value!.Snapshot;
-            var applyError = TryApplySnapshot(snapshot);
+            var applyError = _sessionState.TryApplySnapshot(snapshot);
             if (applyError is not null)
             {
                 return OnlineOperationResult<OnlineMatchSnapshot>.Failure(applyError);
@@ -236,12 +235,7 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         await _gate.WaitAsync(cancellationToken);
         try
         {
-            if (_realtimeClient is null)
-            {
-                return;
-            }
-
-            await _realtimeClient.DisconnectAsync(cancellationToken);
+            await _realtimeLifecycleManager.SuspendAsync(cancellationToken);
             NotifyStateChanged();
         }
         finally
@@ -270,6 +264,8 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         try
         {
             await ResetSessionInternalAsync(CancellationToken.None);
+            DetachRealtimeHandlers();
+            await _realtimeLifecycleManager.DisposeAsync();
         }
         finally
         {
@@ -280,27 +276,25 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
 
     private async Task<OnlineOperationResult<OnlineMatchSnapshot>> RecoverInternalAsync(CancellationToken cancellationToken)
     {
-        if (_credentials is null)
+        if (_sessionState.Credentials is not OnlineMatchCredentials credentials)
         {
             return OnlineOperationResult<OnlineMatchSnapshot>.Failure(CreateSessionNotStartedError());
         }
 
-        var snapshotResult = await _httpClient.GetSnapshotAsync(
-            new OnlineSnapshotRequest(_credentials.MatchId, _credentials.PlayerToken),
-            cancellationToken);
+        var snapshotResult = await _transport.GetSnapshotAsync(credentials, cancellationToken);
         if (!snapshotResult.IsSuccess)
         {
             return OnlineOperationResult<OnlineMatchSnapshot>.Failure(snapshotResult.Error!);
         }
 
         var snapshot = snapshotResult.Value!;
-        var applyError = TryApplySnapshot(snapshot);
+        var applyError = _sessionState.TryApplySnapshot(snapshot);
         if (applyError is not null)
         {
             return OnlineOperationResult<OnlineMatchSnapshot>.Failure(applyError);
         }
 
-        var connectionError = await EnsureConnectedAndSubscribedInternalAsync(_credentials, cancellationToken);
+        var connectionError = await _realtimeLifecycleManager.EnsureConnectedAndSubscribedAsync(credentials, cancellationToken);
         NotifyStateChanged();
 
         if (connectionError is not null)
@@ -312,112 +306,32 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         return OnlineOperationResult<OnlineMatchSnapshot>.Success(snapshot);
     }
 
-    private async Task<OnlineUserError?> EnsureConnectedAndSubscribedInternalAsync(
-        OnlineMatchCredentials credentials,
-        CancellationToken cancellationToken)
-    {
-        var realtimeClient = GetOrCreateRealtimeClient();
-
-        try
-        {
-            await realtimeClient.ConnectAsync(credentials.PlayerToken, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return MapTransportException(ex, "Unable to connect to realtime match updates.");
-        }
-
-        try
-        {
-            await realtimeClient.SubscribeMatchAsync(credentials.MatchId, credentials.PlayerToken, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return MapTransportException(ex, "Unable to subscribe to realtime match updates.");
-        }
-
-        try
-        {
-            await realtimeClient.RequestResyncAsync(credentials.MatchId, credentials.PlayerToken, cancellationToken);
-        }
-        catch (Exception ex)
-        {
-            return MapTransportException(ex, "Unable to request realtime resync.");
-        }
-
-        return null;
-    }
-
-    private IOnlineMatchRealtimeClient GetOrCreateRealtimeClient()
-    {
-        if (_realtimeClient is not null)
-        {
-            return _realtimeClient;
-        }
-
-        _realtimeClient = _realtimeClientFactory.CreateClient();
-        AttachRealtimeHandlers(_realtimeClient);
-        return _realtimeClient;
-    }
-
     private async Task ResetSessionInternalAsync(CancellationToken cancellationToken)
     {
-        if (_realtimeClient is not null)
-        {
-            var realtimeClient = _realtimeClient;
-            DetachRealtimeHandlers(realtimeClient);
-
-            try
-            {
-                if (_credentials is not null && realtimeClient.IsConnected)
-                {
-                    await realtimeClient.UnsubscribeMatchAsync(_credentials.MatchId, cancellationToken);
-                }
-            }
-            catch (Exception)
-            {
-            }
-
-            try
-            {
-                await realtimeClient.DisconnectAsync(cancellationToken);
-            }
-            catch (Exception)
-            {
-            }
-
-            await realtimeClient.DisposeAsync();
-            _realtimeClient = null;
-        }
-
-        _credentials = null;
-        _joinCode = null;
-        _lastSequence = 0;
-        _isResyncInFlight = false;
-        CurrentSnapshot = null;
-        CurrentGameState = null;
+        await _realtimeLifecycleManager.ResetAsync(_sessionState.Credentials, cancellationToken);
+        _sessionState.Reset();
     }
 
-    private void AttachRealtimeHandlers(IOnlineMatchRealtimeClient realtimeClient)
+    private void AttachRealtimeHandlers()
     {
-        realtimeClient.SnapshotReceived += OnSnapshotReceived;
-        realtimeClient.UpdatedReceived += OnUpdatedReceived;
-        realtimeClient.PresenceChangedReceived += OnPresenceChangedReceived;
-        realtimeClient.EndedReceived += OnEndedReceived;
-        realtimeClient.ErrorReceived += OnErrorReceived;
-        realtimeClient.Reconnected += OnReconnected;
-        realtimeClient.Disconnected += OnDisconnected;
+        _realtimeLifecycleManager.SnapshotReceived += OnSnapshotReceived;
+        _realtimeLifecycleManager.UpdatedReceived += OnUpdatedReceived;
+        _realtimeLifecycleManager.PresenceChangedReceived += OnPresenceChangedReceived;
+        _realtimeLifecycleManager.EndedReceived += OnEndedReceived;
+        _realtimeLifecycleManager.ErrorReceived += OnErrorReceived;
+        _realtimeLifecycleManager.Reconnected += OnReconnected;
+        _realtimeLifecycleManager.Disconnected += OnDisconnected;
     }
 
-    private void DetachRealtimeHandlers(IOnlineMatchRealtimeClient realtimeClient)
+    private void DetachRealtimeHandlers()
     {
-        realtimeClient.SnapshotReceived -= OnSnapshotReceived;
-        realtimeClient.UpdatedReceived -= OnUpdatedReceived;
-        realtimeClient.PresenceChangedReceived -= OnPresenceChangedReceived;
-        realtimeClient.EndedReceived -= OnEndedReceived;
-        realtimeClient.ErrorReceived -= OnErrorReceived;
-        realtimeClient.Reconnected -= OnReconnected;
-        realtimeClient.Disconnected -= OnDisconnected;
+        _realtimeLifecycleManager.SnapshotReceived -= OnSnapshotReceived;
+        _realtimeLifecycleManager.UpdatedReceived -= OnUpdatedReceived;
+        _realtimeLifecycleManager.PresenceChangedReceived -= OnPresenceChangedReceived;
+        _realtimeLifecycleManager.EndedReceived -= OnEndedReceived;
+        _realtimeLifecycleManager.ErrorReceived -= OnErrorReceived;
+        _realtimeLifecycleManager.Reconnected -= OnReconnected;
+        _realtimeLifecycleManager.Disconnected -= OnDisconnected;
     }
 
     private void OnSnapshotReceived(object? sender, OnlineMatchSnapshotSyncEvent payload)
@@ -458,14 +372,13 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
     private async Task HandleSnapshotEventAsync(long sequence, OnlineMatchSnapshot snapshot)
     {
         var shouldRunResync = false;
+
         await _gate.WaitAsync(CancellationToken.None);
         try
         {
-            var reduction = _reducer.ReduceSnapshot(CurrentSnapshot, _lastSequence, sequence, snapshot);
+            var reduction = _sessionState.ApplyRealtimeSnapshot(sequence, snapshot, out var applyError);
             if (reduction.Status is OnlineRealtimeApplyStatus.Applied)
             {
-                _lastSequence = reduction.UpdatedSequence;
-                var applyError = TryApplySnapshot(snapshot);
                 if (applyError is not null)
                 {
                     NotifyError(applyError);
@@ -475,9 +388,8 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
                 NotifyStateChanged();
             }
 
-            if (reduction.RequiresResync && !_isResyncInFlight)
+            if (reduction.RequiresResync && _sessionState.TryBeginResync())
             {
-                _isResyncInFlight = true;
                 shouldRunResync = true;
             }
         }
@@ -500,15 +412,9 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         await _gate.WaitAsync(CancellationToken.None);
         try
         {
-            var reduction = _reducer.ReduceMetadataOnly(_lastSequence, sequence);
-            if (reduction.Status is OnlineRealtimeApplyStatus.Applied)
+            var reduction = _sessionState.ApplyRealtimeErrorMetadata(sequence);
+            if (reduction.RequiresResync && _sessionState.TryBeginResync())
             {
-                _lastSequence = reduction.UpdatedSequence;
-            }
-
-            if (reduction.RequiresResync && !_isResyncInFlight)
-            {
-                _isResyncInFlight = true;
                 shouldRunResync = true;
             }
 
@@ -534,26 +440,14 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
         await _gate.WaitAsync(CancellationToken.None);
         try
         {
-            if (_credentials is null || _realtimeClient is null)
+            if (_sessionState.Credentials is not OnlineMatchCredentials credentials)
             {
                 return;
             }
 
-            try
-            {
-                await _realtimeClient.SubscribeMatchAsync(
-                    _credentials.MatchId,
-                    _credentials.PlayerToken,
-                    CancellationToken.None);
-                await _realtimeClient.RequestResyncAsync(
-                    _credentials.MatchId,
-                    _credentials.PlayerToken,
-                    CancellationToken.None);
-            }
-            catch (Exception ex)
-            {
-                reconnectError = MapTransportException(ex, "Unable to resubscribe after reconnect.");
-            }
+            reconnectError = await _realtimeLifecycleManager.ResubscribeAfterReconnectAsync(
+                credentials,
+                CancellationToken.None);
         }
         finally
         {
@@ -581,110 +475,13 @@ public sealed class OnlineMatchSessionService : IOnlineMatchSessionService
             await _gate.WaitAsync(CancellationToken.None);
             try
             {
-                _isResyncInFlight = false;
+                _sessionState.EndResync();
             }
             finally
             {
                 _gate.Release();
             }
         }
-    }
-
-    private OnlineUserError? TryApplySnapshot(OnlineMatchSnapshot snapshot)
-    {
-        try
-        {
-            CurrentSnapshot = snapshot;
-            CurrentGameState = _snapshotMapper.Map(snapshot);
-            return null;
-        }
-        catch (Exception)
-        {
-            return new OnlineUserError(
-                "invalid_snapshot",
-                "Received an invalid snapshot from the server.",
-                OnlineUserAction.RequestResync);
-        }
-    }
-
-    private OnlineUserError MapTransportException(Exception exception, string fallbackMessage)
-    {
-        var transportError = ToTransportError(exception, fallbackMessage);
-        return _errorMapper.Map(transportError);
-    }
-
-    private static OnlineTransportError ToTransportError(Exception exception, string fallbackMessage)
-    {
-        if (exception is HubException hubException &&
-            TryParseHubExceptionMessage(hubException.Message, out var code, out var message))
-        {
-            return new OnlineTransportError(code, message);
-        }
-
-        var messageValue = string.IsNullOrWhiteSpace(exception.Message)
-            ? fallbackMessage
-            : exception.Message;
-        return new OnlineTransportError("transport_error", messageValue);
-    }
-
-    private static bool TryParseHubExceptionMessage(
-        string? hubMessage,
-        out string code,
-        out string message)
-    {
-        code = string.Empty;
-        message = string.Empty;
-
-        if (string.IsNullOrWhiteSpace(hubMessage))
-        {
-            return false;
-        }
-
-        var separatorIndex = hubMessage.IndexOf(':');
-        if (separatorIndex <= 0 || separatorIndex == hubMessage.Length - 1)
-        {
-            return false;
-        }
-
-        code = hubMessage[..separatorIndex].Trim();
-        message = hubMessage[(separatorIndex + 1)..].Trim();
-        return !string.IsNullOrWhiteSpace(code) && !string.IsNullOrWhiteSpace(message);
-    }
-
-    private static bool TryParseSeat(string seatValue, out PieceColor seat)
-    {
-        if (string.Equals(seatValue, OnlineMatchProtocolConstants.CreatorSeat, StringComparison.Ordinal))
-        {
-            seat = PieceColor.White;
-            return true;
-        }
-
-        if (string.Equals(seatValue, OnlineMatchProtocolConstants.JoinerSeat, StringComparison.Ordinal))
-        {
-            seat = PieceColor.Black;
-            return true;
-        }
-
-        seat = default;
-        return false;
-    }
-
-    private static string ToCoordinate(Square square)
-    {
-        return $"{(char)('a' + square.File)}{square.Rank + 1}";
-    }
-
-    private static string? ToPromotionToken(PieceType? promotionPieceType)
-    {
-        return promotionPieceType switch
-        {
-            null => null,
-            PieceType.Queen => "Q",
-            PieceType.Rook => "R",
-            PieceType.Bishop => "B",
-            PieceType.Knight => "N",
-            _ => null
-        };
     }
 
     private static OnlineUserError CreateSessionNotStartedError()
