@@ -22,6 +22,7 @@ namespace Chess.UI.ViewModels;
 
 public sealed class MainWindowViewModel :
     INotifyPropertyChanged,
+    IDisposable,
     IMainWindowLocalPlayContext,
     IMainWindowOnlinePlayContext,
     IMainWindowPersistenceContext
@@ -65,6 +66,7 @@ public sealed class MainWindowViewModel :
     private string _onlineJoinCode = string.Empty;
     private string _onlineSessionText = "Online: not connected.";
     private bool _isOnlineOperationInProgress;
+    private int _disposeState;
 
     public MainWindowViewModel(IGameSessionService gameSessionService)
         : this(gameSessionService, new PieceAssetResolver(), new NoOpAiTurnService(), NoOpOnlineMatchSessionService.Instance)
@@ -771,9 +773,19 @@ public sealed class MainWindowViewModel :
 
     private void OnOnlineSessionStateChanged(object? sender, EventArgs e)
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         EnqueueOnlineUiUpdate(
             () =>
             {
+                if (IsDisposed)
+                {
+                    return;
+                }
+
                 RefreshBoardFromCurrentState();
                 UpdateOnlineSessionText();
                 OnPropertyChanged(nameof(IsOnlineMatchActive));
@@ -784,9 +796,19 @@ public sealed class MainWindowViewModel :
 
     private void OnOnlineSessionError(object? sender, OnlineUserError error)
     {
+        if (IsDisposed)
+        {
+            return;
+        }
+
         EnqueueOnlineUiUpdate(
             () =>
             {
+                if (IsDisposed)
+                {
+                    return;
+                }
+
                 FeedbackText = error.Message;
                 UpdateOnlineSessionText();
             });
@@ -1088,10 +1110,24 @@ public sealed class MainWindowViewModel :
         QueueAiTurnIfNeeded();
     }
 
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposeState, 1) != 0)
+        {
+            return;
+        }
+
+        _onlineMatchSessionService.SessionStateChanged -= OnOnlineSessionStateChanged;
+        _onlineMatchSessionService.SessionError -= OnOnlineSessionError;
+        _aiTurnCoordinator.CancelInFlightAiTurn();
+    }
+
     private void OnPropertyChanged([CallerMemberName] string? propertyName = null)
     {
         PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
     }
+
+    private bool IsDisposed => Volatile.Read(ref _disposeState) != 0;
 
     private sealed class NoOpAiTurnService : IAiTurnService
     {

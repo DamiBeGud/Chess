@@ -263,6 +263,54 @@ public sealed class MainWindowUiIntegrationTests
     }
 
     [AvaloniaFact]
+    public async Task MainWindowClose_DisposesOwnedOnlineSessionServiceExactlyOnce()
+    {
+        var disposeStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowDisposeCompletion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var onlineService = new StubOnlineMatchSessionService
+        {
+            DisposeAsyncStarted = disposeStarted,
+            DisposeAsyncCompletion = allowDisposeCompletion
+        };
+        var viewModel = new MainWindowViewModel(
+            CreateSessionService(),
+            new PieceAssetResolver(_ => new TestImage()),
+            new PassiveAiTurnService(),
+            onlineService);
+        var window = new MainWindow(viewModel, onlineService);
+        var closedTask = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        window.Closed += (_, _) => closedTask.TrySetResult(true);
+
+        try
+        {
+            window.Show();
+
+            window.Close();
+            await WaitForConditionAsync(() => onlineService.DisposeAsyncCallCount == 1);
+
+            window.Close();
+            await Task.Delay(50);
+
+            Assert.Equal(1, onlineService.DisposeAsyncCallCount);
+            Assert.False(closedTask.Task.IsCompleted);
+
+            allowDisposeCompletion.SetResult(true);
+            var completedTask = await Task.WhenAny(closedTask.Task, Task.Delay(3000));
+
+            Assert.Same(closedTask.Task, completedTask);
+            Assert.Equal(1, onlineService.DisposeAsyncCallCount);
+        }
+        finally
+        {
+            allowDisposeCompletion.TrySetResult(true);
+            if (window.IsVisible)
+            {
+                window.Close();
+            }
+        }
+    }
+
+    [AvaloniaFact]
     public async Task SaveLoadControls_FromGui_RestoreRoundTripState()
     {
         var window = CreateWindow(CreateSessionService());
@@ -1254,6 +1302,7 @@ public sealed class MainWindowUiIntegrationTests
     private sealed class StubOnlineMatchSessionService : IOnlineMatchSessionService
     {
         private static readonly OnlineUserError DefaultFailure = new("test_error", "Not configured.", OnlineUserAction.Retry);
+        private int _disposeAsyncCallCount;
 
         public event EventHandler? SessionStateChanged
         {
@@ -1284,6 +1333,9 @@ public sealed class MainWindowUiIntegrationTests
         public long LastSequence { get; set; }
 
         public Func<CancellationToken, Task<OnlineOperationResult<OnlineCreatedMatch>>>? CreateMatchAsyncHandler { get; set; }
+        public TaskCompletionSource<bool>? DisposeAsyncStarted { get; set; }
+        public TaskCompletionSource<bool>? DisposeAsyncCompletion { get; set; }
+        public int DisposeAsyncCallCount => Volatile.Read(ref _disposeAsyncCallCount);
 
         public Task<OnlineOperationResult<OnlineCreatedMatch>> CreateMatchAsync(CancellationToken cancellationToken = default)
         {
@@ -1338,9 +1390,15 @@ public sealed class MainWindowUiIntegrationTests
             return Task.CompletedTask;
         }
 
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
-            return ValueTask.CompletedTask;
+            Interlocked.Increment(ref _disposeAsyncCallCount);
+            DisposeAsyncStarted?.TrySetResult(true);
+
+            if (DisposeAsyncCompletion is TaskCompletionSource<bool> completion)
+            {
+                await completion.Task;
+            }
         }
     }
 

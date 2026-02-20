@@ -53,7 +53,8 @@ public partial class App : Avalonia.Application
                 aiTurnService,
                 onlineMatchSessionService);
 
-            desktop.MainWindow = new MainWindow(mainWindowViewModel);
+            // MainWindow owns online session lifecycle and disposes it once during window/app shutdown.
+            desktop.MainWindow = new MainWindow(mainWindowViewModel, onlineMatchSessionService);
         }
 
         base.OnFrameworkInitializationCompleted();

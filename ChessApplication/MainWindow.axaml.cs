@@ -1,7 +1,11 @@
 using System;
+using System.Threading;
+using System.Threading.Tasks;
 using Avalonia.Controls;
 using Avalonia.Input;
 using Avalonia.Interactivity;
+using Avalonia.Threading;
+using Chess.Online;
 using Chess.UI.ViewModels;
 
 namespace Chess;
@@ -9,6 +13,10 @@ namespace Chess;
 public partial class MainWindow : Window
 {
     private const double NarrowLayoutBreakpointWidth = 980d;
+    private MainWindowViewModel? _ownedViewModel;
+    private IOnlineMatchSessionService? _ownedOnlineMatchSessionService;
+    private int _ownedViewModelDisposed;
+    private int _onlineShutdownState;
     private bool _isNarrowLayout;
 
     public MainWindow()
@@ -17,14 +25,25 @@ public partial class MainWindow : Window
         AddHandler(InputElement.KeyDownEvent, OnWindowKeyDown, RoutingStrategies.Tunnel, true);
         SizeChanged += OnWindowSizeChanged;
         LayoutUpdated += OnWindowLayoutUpdated;
+        Closing += OnWindowClosing;
         UpdateResponsiveLayout(GetResponsiveWidth(Bounds.Width));
     }
 
     public MainWindow(MainWindowViewModel viewModel)
         : this()
     {
-        System.ArgumentNullException.ThrowIfNull(viewModel);
+        ArgumentNullException.ThrowIfNull(viewModel);
+        _ownedViewModel = viewModel;
         DataContext = viewModel;
+    }
+
+    public MainWindow(
+        MainWindowViewModel viewModel,
+        IOnlineMatchSessionService onlineMatchSessionService)
+        : this(viewModel)
+    {
+        ArgumentNullException.ThrowIfNull(onlineMatchSessionService);
+        _ownedOnlineMatchSessionService = onlineMatchSessionService;
     }
 
     private void OnWindowKeyDown(object? sender, KeyEventArgs e)
@@ -47,6 +66,36 @@ public partial class MainWindow : Window
         {
             e.Handled = true;
         }
+    }
+
+    private void OnWindowClosing(object? sender, WindowClosingEventArgs e)
+    {
+        var onlineService = _ownedOnlineMatchSessionService;
+        if (onlineService is null)
+        {
+            DisposeOwnedViewModel();
+            return;
+        }
+
+        var shutdownState = Volatile.Read(ref _onlineShutdownState);
+        if (shutdownState == 2)
+        {
+            return;
+        }
+
+        e.Cancel = true;
+        if (shutdownState == 1)
+        {
+            return;
+        }
+
+        if (Interlocked.CompareExchange(ref _onlineShutdownState, 1, 0) != 0)
+        {
+            return;
+        }
+
+        DisposeOwnedViewModel();
+        _ = DisposeOwnedOnlineServiceAndCloseAsync(onlineService);
     }
 
     private void OnWindowSizeChanged(object? sender, SizeChangedEventArgs e)
@@ -107,5 +156,52 @@ public partial class MainWindow : Window
         SidePanelBorder.MinWidth = 260;
         SidePanelBorder.MaxWidth = 340;
         SidePanelBorder.HorizontalAlignment = Avalonia.Layout.HorizontalAlignment.Stretch;
+    }
+
+    private void DisposeOwnedViewModel()
+    {
+        if (_ownedViewModel is null)
+        {
+            return;
+        }
+
+        if (Interlocked.Exchange(ref _ownedViewModelDisposed, 1) != 0)
+        {
+            return;
+        }
+
+        _ownedViewModel.Dispose();
+    }
+
+    private async Task DisposeOwnedOnlineServiceAndCloseAsync(IOnlineMatchSessionService onlineService)
+    {
+        try
+        {
+            await onlineService.DisposeAsync();
+        }
+        catch (Exception)
+        {
+            // Best effort during shutdown: continue closing even if disposal fails.
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _onlineShutdownState, 2);
+
+            try
+            {
+                Dispatcher.UIThread.Post(
+                    static state => ((MainWindow)state!).Close(),
+                    this,
+                    DispatcherPriority.Background);
+            }
+            catch (ObjectDisposedException)
+            {
+                // Window/dispatcher already torn down.
+            }
+            catch (InvalidOperationException)
+            {
+                // Dispatcher is no longer accepting work.
+            }
+        }
     }
 }

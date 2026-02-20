@@ -783,6 +783,45 @@ public sealed class MainWindowViewModelTests
         Assert.True(Volatile.Read(ref observedMutations) > 0);
     }
 
+    [AvaloniaFact]
+    public async Task Dispose_UnsubscribesOnlineSessionEvents_AndPreventsCallbacksAfterDisposal()
+    {
+        var onlineService = new FakeOnlineMatchSessionService();
+        var viewModel = CreateOnlineViewModel(onlineService);
+        var initialSessionText = viewModel.OnlineSessionText;
+        var initialFeedbackText = viewModel.FeedbackText;
+
+        Assert.Equal(1, onlineService.SessionStateChangedSubscribeCount);
+        Assert.Equal(1, onlineService.SessionErrorSubscribeCount);
+
+        viewModel.Dispose();
+        viewModel.Dispose();
+
+        Assert.Equal(1, onlineService.SessionStateChangedUnsubscribeCount);
+        Assert.Equal(1, onlineService.SessionErrorUnsubscribeCount);
+
+        await Task.Run(
+            () =>
+            {
+                onlineService.IsInMatch = true;
+                onlineService.IsConnected = true;
+                onlineService.MatchId = "match-after-dispose";
+                onlineService.JoinCode = "ZZZ999";
+                onlineService.Seat = PieceColor.Black;
+                onlineService.RaiseSessionStateChanged();
+                onlineService.RaiseSessionError(
+                    new OnlineUserError(
+                        "disposed_callback",
+                        "Callback after dispose.",
+                        OnlineUserAction.Retry));
+            });
+
+        await Task.Delay(50);
+
+        Assert.Equal(initialSessionText, viewModel.OnlineSessionText);
+        Assert.Equal(initialFeedbackText, viewModel.FeedbackText);
+    }
+
     [Fact]
     public async Task OnlineSquareClick_SubmitMoveException_ShowsDeterministicFeedback()
     {
@@ -1126,9 +1165,45 @@ public sealed class MainWindowViewModelTests
     private sealed class FakeOnlineMatchSessionService : IOnlineMatchSessionService
     {
         private static readonly OnlineUserError DefaultFailure = new("test_error", "Not configured.", OnlineUserAction.Retry);
+        private EventHandler? _sessionStateChanged;
+        private EventHandler<OnlineUserError>? _sessionError;
+        private int _sessionStateChangedSubscribeCount;
+        private int _sessionStateChangedUnsubscribeCount;
+        private int _sessionErrorSubscribeCount;
+        private int _sessionErrorUnsubscribeCount;
 
-        public event EventHandler? SessionStateChanged;
-        public event EventHandler<OnlineUserError>? SessionError;
+        public int SessionStateChangedSubscribeCount => Volatile.Read(ref _sessionStateChangedSubscribeCount);
+        public int SessionStateChangedUnsubscribeCount => Volatile.Read(ref _sessionStateChangedUnsubscribeCount);
+        public int SessionErrorSubscribeCount => Volatile.Read(ref _sessionErrorSubscribeCount);
+        public int SessionErrorUnsubscribeCount => Volatile.Read(ref _sessionErrorUnsubscribeCount);
+
+        public event EventHandler? SessionStateChanged
+        {
+            add
+            {
+                _sessionStateChanged += value;
+                Interlocked.Increment(ref _sessionStateChangedSubscribeCount);
+            }
+            remove
+            {
+                _sessionStateChanged -= value;
+                Interlocked.Increment(ref _sessionStateChangedUnsubscribeCount);
+            }
+        }
+
+        public event EventHandler<OnlineUserError>? SessionError
+        {
+            add
+            {
+                _sessionError += value;
+                Interlocked.Increment(ref _sessionErrorSubscribeCount);
+            }
+            remove
+            {
+                _sessionError -= value;
+                Interlocked.Increment(ref _sessionErrorUnsubscribeCount);
+            }
+        }
 
         public bool IsInMatch { get; set; }
         public bool IsConnected { get; set; }
@@ -1236,12 +1311,12 @@ public sealed class MainWindowViewModelTests
 
         public void RaiseSessionStateChanged()
         {
-            SessionStateChanged?.Invoke(this, EventArgs.Empty);
+            _sessionStateChanged?.Invoke(this, EventArgs.Empty);
         }
 
         public void RaiseSessionError(OnlineUserError error)
         {
-            SessionError?.Invoke(this, error);
+            _sessionError?.Invoke(this, error);
         }
     }
 }
