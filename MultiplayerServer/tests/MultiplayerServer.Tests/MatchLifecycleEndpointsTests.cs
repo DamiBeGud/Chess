@@ -90,6 +90,69 @@ public sealed class MatchLifecycleEndpointsTests
     }
 
     [Fact]
+    public void GetMatchSnapshot_AuthorizedPlayer_ReturnsCanonicalSnapshot()
+    {
+        var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
+        var created = lifecycleService.CreateMatch();
+        _ = lifecycleService.JoinMatch(created.JoinCode);
+        _ = lifecycleService.SubmitMove(created.MatchId, created.CreatorToken, "e2", "e4", null);
+
+        var result = MatchLifecycleEndpoints.GetMatchSnapshot(
+            new GetMatchSnapshotRequest(created.MatchId, created.CreatorToken),
+            lifecycleService,
+            errorMapper);
+
+        var ok = Assert.IsType<Ok<MatchSnapshotResponse>>(result);
+        Assert.NotNull(ok.Value);
+        Assert.Equal(created.MatchId, ok.Value.MatchId);
+        Assert.Equal(2, ok.Value.MoveNumber);
+        Assert.Equal(MatchSeats.Joiner, ok.Value.SideToMove);
+        Assert.Equal(MatchProtocolConstants.MatchStatusInProgress, ok.Value.Status);
+        Assert.Null(ok.Value.Resolution);
+        Assert.Null(ok.Value.WinnerSeat);
+        Assert.NotNull(ok.Value.Presence);
+        Assert.True(ok.Value.Presence.Creator.IsReserved);
+        Assert.True(ok.Value.Presence.Joiner.IsReserved);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_Failure_IsMappedByHttpMapper()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(
+            new GetMatchSnapshotFailed(
+                new GetMatchSnapshotFailure(MatchErrorCodes.InvalidPlayerToken, "invalid token")));
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var result = MatchLifecycleEndpoints.GetMatchSnapshot(
+            new GetMatchSnapshotRequest("match", "token"),
+            lifecycleService,
+            errorMapper);
+
+        var statusCode = Assert.IsAssignableFrom<IStatusCodeHttpResult>(result);
+        Assert.Equal(StatusCodes.Status403Forbidden, statusCode.StatusCode);
+        var json = Assert.IsType<JsonHttpResult<ApiErrorResponse>>(result);
+        Assert.NotNull(json.Value);
+        Assert.Equal(MatchErrorCodes.InvalidPlayerToken, json.Value.Code);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_NullRequest_UsesUseCaseValidationAndReturnsBadRequestCode()
+    {
+        var lifecycleService = new InMemoryMatchLifecycleService();
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var result = MatchLifecycleEndpoints.GetMatchSnapshot(
+            request: null,
+            lifecycleService,
+            errorMapper);
+
+        var badRequest = Assert.IsType<BadRequest<ApiErrorResponse>>(result);
+        Assert.NotNull(badRequest.Value);
+        Assert.Equal(MatchErrorCodes.MatchIdRequired, badRequest.Value.Code);
+    }
+
+    [Fact]
     public async Task SubmitMove_PublishFailure_BubblesException()
     {
         var lifecycleService = new InMemoryMatchLifecycleService();
@@ -108,6 +171,83 @@ public sealed class MatchLifecycleEndpointsTests
                 publisher,
                 EventIdGenerator,
                 CancellationToken.None));
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_UnsupportedOutcomeType_ThrowsInvalidOperationException()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(new UnknownGetSnapshotOutcome());
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.GetMatchSnapshot(
+                new GetMatchSnapshotRequest("match", "token"),
+                lifecycleService,
+                errorMapper));
+
+        Assert.StartsWith("Unsupported get-snapshot outcome type:", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_NullOutcome_ThrowsInvalidOperationException()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(null);
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.GetMatchSnapshot(
+                new GetMatchSnapshotRequest("match", "token"),
+                lifecycleService,
+                errorMapper));
+
+        Assert.Equal("Get-snapshot outcome must not be null.", exception.Message);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_NullSuccessPayload_ThrowsInvalidOperationException()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(new GetMatchSnapshotSucceeded(null!));
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.GetMatchSnapshot(
+                new GetMatchSnapshotRequest("match", "token"),
+                lifecycleService,
+                errorMapper));
+
+        Assert.Equal("Get-snapshot success outcome must include a valid snapshot payload.", exception.Message);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_SuccessOutcomeWithInvalidSnapshot_ThrowsInvalidOperationException()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(
+            new GetMatchSnapshotSucceeded(
+                new GetMatchSnapshotSuccess(CreateSnapshot(moveNumber: 0))));
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.GetMatchSnapshot(
+                new GetMatchSnapshotRequest("match", "token"),
+                lifecycleService,
+                errorMapper));
+
+        Assert.Equal("Get-snapshot success outcome must include a valid snapshot payload.", exception.Message);
+    }
+
+    [Fact]
+    public void GetMatchSnapshot_NullFailurePayload_ThrowsInvalidOperationException()
+    {
+        var lifecycleService = new StubGetSnapshotUseCase(new GetMatchSnapshotFailed(null!));
+        var errorMapper = new V1MatchErrorHttpMapper();
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            MatchLifecycleEndpoints.GetMatchSnapshot(
+                new GetMatchSnapshotRequest("match", "token"),
+                lifecycleService,
+                errorMapper));
+
+        Assert.Equal("Get-snapshot failure outcome must include an error payload.", exception.Message);
     }
 
     [Fact]
@@ -391,6 +531,12 @@ public sealed class MatchLifecycleEndpointsTests
             => outcome!;
     }
 
+    private sealed class StubGetSnapshotUseCase(GetMatchSnapshotOutcome? outcome) : IGetMatchSnapshotUseCase
+    {
+        public GetMatchSnapshotOutcome GetMatchSnapshot(string? matchId, string? playerToken)
+            => outcome!;
+    }
+
     private sealed class NoOpMatchSyncPublisher : IMatchSyncPublisher
     {
         public Task PublishMatchUpdatedAsync(
@@ -537,4 +683,6 @@ public sealed class MatchLifecycleEndpointsTests
     private sealed record UnknownJoinMatchOutcome : JoinMatchOutcome;
 
     private sealed record UnknownSubmitMoveOutcome : SubmitMoveOutcome;
+
+    private sealed record UnknownGetSnapshotOutcome : GetMatchSnapshotOutcome;
 }

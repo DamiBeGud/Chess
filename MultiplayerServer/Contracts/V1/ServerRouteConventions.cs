@@ -8,5 +8,6 @@ public static class ServerRouteConventions
     public const string ApiV1Matches = "/matches";
     public const string ApiV1MatchesJoin = "/matches/join";
     public const string ApiV1MatchesMoves = "/matches/moves";
+    public const string ApiV1MatchesSnapshot = "/matches/snapshot";
     public const string MatchHubV1 = "/hubs/v1/matches";
 }

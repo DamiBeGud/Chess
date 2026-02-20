@@ -40,6 +40,7 @@ The collection covers all HTTP endpoints currently exposed:
 - `POST /api/v1/matches`
 - `POST /api/v1/matches/join`
 - `POST /api/v1/matches/moves`
+- `POST /api/v1/matches/snapshot`
 
 It includes positive flow plus negative contract checks for:
 
@@ -54,5 +55,6 @@ It includes positive flow plus negative contract checks for:
 - `player_token_required`
 - `move_coordinates_required`
 - `illegal_move`
+- snapshot recovery success contract (`status`, `presence`, board/turn metadata)
 
 MS-005 realtime-only paths (`grace_expired`, `seat_not_reconnectable`, `unauthorized_resume`, `match_already_ended` after disconnect timeout) are validated by integration tests via SignalR, not by Newman HTTP requests.

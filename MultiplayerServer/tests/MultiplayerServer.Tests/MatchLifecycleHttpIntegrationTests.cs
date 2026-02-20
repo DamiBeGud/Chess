@@ -1,6 +1,8 @@
 using System.Net;
 using System.Net.Http.Json;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.DependencyInjection;
+using MultiplayerServer.Application.Matches;
 using MultiplayerServer.Contracts.V1;
 
 namespace MultiplayerServer.Tests;
@@ -88,6 +90,178 @@ public sealed class MatchLifecycleHttpIntegrationTests
         var payload = await joinResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
         Assert.NotNull(payload);
         Assert.Equal(MatchProtocolConstants.ErrorJoinCodeRequired, payload.Code);
+    }
+
+    [Fact]
+    public async Task GetSnapshot_AuthorizedPlayersReceiveCanonicalSnapshot()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+        await SubmitMoveAcceptedAsync(client, created.MatchId, created.CreatorToken, "e2", "e4");
+
+        var creatorSnapshotResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, created.CreatorToken));
+        Assert.Equal(HttpStatusCode.OK, creatorSnapshotResponse.StatusCode);
+        var creatorSnapshot = await creatorSnapshotResponse.Content.ReadFromJsonAsync<MatchSnapshotResponse>();
+        Assert.NotNull(creatorSnapshot);
+        Assert.Equal(created.MatchId, creatorSnapshot.MatchId);
+        Assert.Equal(2, creatorSnapshot.MoveNumber);
+        Assert.Equal(MatchProtocolConstants.JoinerSeat, creatorSnapshot.SideToMove);
+        Assert.Equal(MatchProtocolConstants.MatchStatusInProgress, creatorSnapshot.Status);
+        Assert.NotNull(creatorSnapshot.Presence);
+
+        var joinerSnapshotResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, joined.PlayerToken));
+        Assert.Equal(HttpStatusCode.OK, joinerSnapshotResponse.StatusCode);
+        var joinerSnapshot = await joinerSnapshotResponse.Content.ReadFromJsonAsync<MatchSnapshotResponse>();
+        Assert.NotNull(joinerSnapshot);
+        Assert.Equal(creatorSnapshot.MatchId, joinerSnapshot.MatchId);
+        Assert.Equal(creatorSnapshot.MoveNumber, joinerSnapshot.MoveNumber);
+        Assert.Equal(creatorSnapshot.SideToMove, joinerSnapshot.SideToMove);
+        Assert.Equal(PieceAt(creatorSnapshot, "e4"), PieceAt(joinerSnapshot, "e4"));
+    }
+
+    [Fact]
+    public async Task GetSnapshot_InvalidTokenAndUnknownMatchReturnExplicitCodes()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var invalidTokenResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, "invalid-token"));
+
+        Assert.Equal(HttpStatusCode.Forbidden, invalidTokenResponse.StatusCode);
+        var invalidTokenPayload = await invalidTokenResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(invalidTokenPayload);
+        Assert.Equal(MatchProtocolConstants.ErrorInvalidPlayerToken, invalidTokenPayload.Code);
+
+        var unknownMatchResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(Guid.NewGuid().ToString("N"), created.CreatorToken));
+
+        Assert.Equal(HttpStatusCode.NotFound, unknownMatchResponse.StatusCode);
+        var unknownMatchPayload = await unknownMatchResponse.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(unknownMatchPayload);
+        Assert.Equal(MatchProtocolConstants.ErrorMatchNotFound, unknownMatchPayload.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetSnapshot_MissingMatchIdReturnsBadRequestWithExplicitCode(string? matchId)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(matchId, created.CreatorToken));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorMatchIdRequired, payload.Code);
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task GetSnapshot_MissingPlayerTokenReturnsBadRequestWithExplicitCode(string? playerToken)
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+
+        var response = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, playerToken));
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorPlayerTokenRequired, payload.Code);
+    }
+
+    [Fact]
+    public async Task GetSnapshot_MissingBodyReturnsBadRequestWithExplicitCode()
+    {
+        await using var factory = new WebApplicationFactory<Program>();
+        using var client = factory.CreateClient();
+
+        var response = await client.PostAsync("/api/v1/matches/snapshot", content: null);
+
+        Assert.Equal(HttpStatusCode.BadRequest, response.StatusCode);
+        var payload = await response.Content.ReadFromJsonAsync<ApiErrorResponse>();
+        Assert.NotNull(payload);
+        Assert.Equal(MatchProtocolConstants.ErrorMatchIdRequired, payload.Code);
+    }
+
+    [Fact]
+    public async Task GetSnapshot_ReflectsDisconnectAndReconnectRecovery()
+    {
+        await using var factory = CreateFactory(options => options.DisconnectGracePeriodSeconds = 2);
+        using var client = factory.CreateClient();
+        var (created, _) = await CreateStartedMatchAsync(client);
+        var disconnectUseCase = factory.Services.GetRequiredService<IDisconnectMatchUseCase>();
+        var reconnectUseCase = factory.Services.GetRequiredService<IReconnectMatchUseCase>();
+
+        var disconnected = disconnectUseCase.DisconnectMatch(created.MatchId, created.CreatorToken);
+        Assert.IsType<DisconnectMatchSucceeded>(disconnected);
+
+        var duringGraceResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, created.CreatorToken));
+        Assert.Equal(HttpStatusCode.OK, duringGraceResponse.StatusCode);
+        var duringGrace = await duringGraceResponse.Content.ReadFromJsonAsync<MatchSnapshotResponse>();
+        Assert.NotNull(duringGrace);
+        Assert.NotNull(duringGrace.Presence);
+        Assert.False(duringGrace.Presence.Creator.IsConnected);
+        Assert.NotNull(duringGrace.Presence.Creator.DisconnectedUtc);
+        Assert.NotNull(duringGrace.Presence.Creator.GraceExpiresUtc);
+
+        var reconnected = reconnectUseCase.ReconnectMatch(created.MatchId, created.CreatorToken);
+        Assert.IsType<ReconnectMatchSucceeded>(reconnected);
+
+        var recoveredResponse = await client.PostAsJsonAsync(
+            "/api/v1/matches/snapshot",
+            new GetMatchSnapshotRequest(created.MatchId, created.CreatorToken));
+        Assert.Equal(HttpStatusCode.OK, recoveredResponse.StatusCode);
+        var recovered = await recoveredResponse.Content.ReadFromJsonAsync<MatchSnapshotResponse>();
+        Assert.NotNull(recovered);
+        Assert.NotNull(recovered.Presence);
+        Assert.True(recovered.Presence.Creator.IsConnected);
+        Assert.Null(recovered.Presence.Creator.DisconnectedUtc);
+        Assert.Null(recovered.Presence.Creator.GraceExpiresUtc);
+    }
+
+    [Fact]
+    public async Task GetSnapshot_ReflectsTerminalStateAfterAbandonmentResolution()
+    {
+        await using var factory = CreateFactory(
+            options =>
+            {
+                options.DisconnectGracePeriodSeconds = 1;
+                options.AbandonmentResolution = MatchAbandonmentResolutionMode.Forfeit;
+            });
+        using var client = factory.CreateClient();
+        var (created, joined) = await CreateStartedMatchAsync(client);
+        var disconnectUseCase = factory.Services.GetRequiredService<IDisconnectMatchUseCase>();
+
+        var disconnected = disconnectUseCase.DisconnectMatch(created.MatchId, created.CreatorToken);
+        Assert.IsType<DisconnectMatchSucceeded>(disconnected);
+
+        var terminalSnapshot = await WaitForTerminalSnapshotAsync(client, created.MatchId, joined.PlayerToken);
+        Assert.Equal(MatchProtocolConstants.MatchStatusEnded, terminalSnapshot.Status);
+        Assert.Equal(MatchProtocolConstants.MatchResolutionForfeit, terminalSnapshot.Resolution);
+        Assert.Equal(MatchProtocolConstants.JoinerSeat, terminalSnapshot.WinnerSeat);
     }
 
     [Fact]
@@ -456,6 +630,52 @@ public sealed class MatchLifecycleHttpIntegrationTests
         Assert.NotNull(joined);
 
         return (created, joined);
+    }
+
+    private static WebApplicationFactory<Program> CreateFactory(
+        Action<MatchDisconnectPolicyOptions>? configurePolicy = null)
+    {
+        return new WebApplicationFactory<Program>()
+            .WithWebHostBuilder(
+                builder =>
+                {
+                    builder.ConfigureServices(
+                        services =>
+                        {
+                            if (configurePolicy is not null)
+                            {
+                                services.PostConfigure(configurePolicy);
+                            }
+                        });
+                });
+    }
+
+    private static async Task<MatchSnapshotResponse> WaitForTerminalSnapshotAsync(
+        HttpClient client,
+        string matchId,
+        string playerToken,
+        TimeSpan? timeout = null)
+    {
+        var until = DateTimeOffset.UtcNow + (timeout ?? TimeSpan.FromSeconds(10));
+        while (DateTimeOffset.UtcNow < until)
+        {
+            var response = await client.PostAsJsonAsync(
+                "/api/v1/matches/snapshot",
+                new GetMatchSnapshotRequest(matchId, playerToken));
+            if (response.StatusCode == HttpStatusCode.OK)
+            {
+                var snapshot = await response.Content.ReadFromJsonAsync<MatchSnapshotResponse>();
+                if (snapshot is not null &&
+                    string.Equals(snapshot.Status, MatchProtocolConstants.MatchStatusEnded, StringComparison.Ordinal))
+                {
+                    return snapshot;
+                }
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(25));
+        }
+
+        throw new TimeoutException($"Timed out waiting for terminal snapshot for {matchId}.");
     }
 
     private static async Task<SubmitMoveResponse> SubmitMoveAcceptedAsync(

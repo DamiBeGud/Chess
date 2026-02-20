@@ -10,4 +10,6 @@ public interface IMatchErrorHttpMapper
         MapJoinFailure(JoinMatchFailure failure);
 
     IResult MapSubmitMoveFailure(SubmitMoveFailure failure);
+
+    IResult MapGetSnapshotFailure(GetMatchSnapshotFailure failure);
 }

@@ -38,6 +38,20 @@ public sealed class MatchErrorHttpMapperTests
             { "unknown_submit_move_error", StatusCodes.Status400BadRequest }
         };
 
+    public static TheoryData<string, int> SnapshotFailureMappings =>
+        new()
+        {
+            { MatchProtocolConstants.ErrorMatchNotFound, StatusCodes.Status404NotFound },
+            { MatchProtocolConstants.ErrorInvalidPlayerToken, StatusCodes.Status403Forbidden },
+            { MatchProtocolConstants.ErrorUnauthorizedResume, StatusCodes.Status403Forbidden },
+            { MatchProtocolConstants.ErrorMatchIdRequired, StatusCodes.Status400BadRequest },
+            { MatchProtocolConstants.ErrorPlayerTokenRequired, StatusCodes.Status400BadRequest },
+            { MatchProtocolConstants.ErrorGraceExpired, StatusCodes.Status409Conflict },
+            { MatchProtocolConstants.ErrorSeatNotReconnectable, StatusCodes.Status409Conflict },
+            { MatchProtocolConstants.ErrorMatchAlreadyEnded, StatusCodes.Status409Conflict },
+            { "unknown_snapshot_error", StatusCodes.Status400BadRequest }
+        };
+
     [Theory]
     [MemberData(nameof(JoinFailureMappings))]
     public void MapJoinFailure_AllRelevantCodes_MapToExpectedStatusAndPayload(string code, int expectedStatusCode)
@@ -69,11 +83,35 @@ public sealed class MatchErrorHttpMapperTests
         Assert.Equal(message, payload.Message);
     }
 
+    [Theory]
+    [MemberData(nameof(SnapshotFailureMappings))]
+    public void MapGetSnapshotFailure_AllRelevantCodes_MapToExpectedStatusAndPayload(string code, int expectedStatusCode)
+    {
+        var message = $"{code} message";
+        var mapped = Mapper.MapGetSnapshotFailure(new GetMatchSnapshotFailure(code, message));
+
+        var statusCodeResult = Assert.IsAssignableFrom<IStatusCodeHttpResult>(mapped);
+        Assert.Equal(expectedStatusCode, statusCodeResult.StatusCode);
+
+        var payload = ExtractPayload(mapped);
+        Assert.Equal(code, payload.Code);
+        Assert.Equal(message, payload.Message);
+    }
+
     [Fact]
     public void MapSubmitMoveFailure_InvalidPlayerToken_UsesJsonForbiddenResponse()
     {
         var mapped = Mapper.MapSubmitMoveFailure(
             new SubmitMoveFailure(MatchProtocolConstants.ErrorInvalidPlayerToken, "invalid"));
+
+        Assert.IsType<JsonHttpResult<ApiErrorResponse>>(mapped);
+    }
+
+    [Fact]
+    public void MapGetSnapshotFailure_InvalidPlayerToken_UsesJsonForbiddenResponse()
+    {
+        var mapped = Mapper.MapGetSnapshotFailure(
+            new GetMatchSnapshotFailure(MatchProtocolConstants.ErrorInvalidPlayerToken, "invalid"));
 
         Assert.IsType<JsonHttpResult<ApiErrorResponse>>(mapped);
     }

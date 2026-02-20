@@ -221,6 +221,52 @@
             "url": "{{baseUrl}}/api/v1/matches/moves"
           },
           "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/snapshot (Recovery Snapshot)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 200', function () {",
+                  "  pm.response.to.have.status(200);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.matchId).to.eql(pm.collectionVariables.get('matchId'));",
+                  "pm.expect(payload).to.have.property('sideToMove');",
+                  "pm.expect(payload).to.have.property('moveNumber');",
+                  "pm.expect(payload).to.have.property('board');",
+                  "pm.expect(payload).to.have.property('status');",
+                  "pm.expect(payload).to.have.property('presence');",
+                  "pm.expect(payload.presence).to.have.property('creator');",
+                  "pm.expect(payload.presence).to.have.property('joiner');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"{{creatorToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/snapshot"
+          },
+          "response": []
         }
       ]
     },
@@ -718,6 +764,162 @@
               }
             },
             "url": "{{baseUrl}}/api/v1/matches/moves"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/snapshot -> 403 invalid_player_token",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 403', function () {",
+                  "  pm.response.to.have.status(403);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('invalid_player_token');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"not-a-real-token\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/snapshot"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/snapshot -> 404 match_not_found",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 404', function () {",
+                  "  pm.response.to.have.status(404);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_not_found');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{unknownMatchId}}\",\n  \"playerToken\": \"{{creatorToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/snapshot"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/snapshot -> 400 match_id_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('match_id_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"   \",\n  \"playerToken\": \"{{creatorToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/snapshot"
+          },
+          "response": []
+        },
+        {
+          "name": "POST /api/v1/matches/snapshot -> 400 player_token_required",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status is 400', function () {",
+                  "  pm.response.to.have.status(400);",
+                  "});",
+                  "",
+                  "const payload = pm.response.json();",
+                  "pm.expect(payload.code).to.eql('player_token_required');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"matchId\": \"{{matchId}}\",\n  \"playerToken\": \"   \"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": "{{baseUrl}}/api/v1/matches/snapshot"
           },
           "response": []
         }

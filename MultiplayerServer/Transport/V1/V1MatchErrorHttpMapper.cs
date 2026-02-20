@@ -49,4 +49,24 @@ public sealed class V1MatchErrorHttpMapper : IMatchErrorHttpMapper
                 TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
         };
     }
+
+    public IResult MapGetSnapshotFailure(GetMatchSnapshotFailure failure)
+    {
+        return failure.Code switch
+        {
+            MatchErrorCodes.MatchNotFound =>
+                TypedResults.NotFound(new ApiErrorResponse(failure.Code, failure.Message)),
+            MatchErrorCodes.InvalidPlayerToken or
+            MatchErrorCodes.UnauthorizedResume =>
+                TypedResults.Json(
+                    new ApiErrorResponse(failure.Code, failure.Message),
+                    statusCode: StatusCodes.Status403Forbidden),
+            MatchErrorCodes.MatchAlreadyEnded or
+            MatchErrorCodes.SeatNotReconnectable or
+            MatchErrorCodes.GraceExpired =>
+                TypedResults.Conflict(new ApiErrorResponse(failure.Code, failure.Message)),
+            _ =>
+                TypedResults.BadRequest(new ApiErrorResponse(failure.Code, failure.Message))
+        };
+    }
 }

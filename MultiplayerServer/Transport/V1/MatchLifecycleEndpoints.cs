@@ -12,6 +12,7 @@ public static class MatchLifecycleEndpoints
         group.MapPost(ServerRouteConventions.ApiV1Matches, CreateMatch);
         group.MapPost(ServerRouteConventions.ApiV1MatchesJoin, JoinMatch);
         group.MapPost(ServerRouteConventions.ApiV1MatchesMoves, SubmitMove);
+        group.MapPost(ServerRouteConventions.ApiV1MatchesSnapshot, GetMatchSnapshot);
         return group;
     }
 
@@ -37,6 +38,26 @@ public static class MatchLifecycleEndpoints
             JoinMatchFailed { Error: { } error } => errorHttpMapper.MapJoinFailure(error),
             JoinMatchFailed => throw new InvalidOperationException("Join failure outcome must include an error payload."),
             _ => throw new InvalidOperationException($"Unsupported join outcome type: {result.GetType().Name}")
+        };
+    }
+
+    public static IResult GetMatchSnapshot(
+        GetMatchSnapshotRequest? request,
+        IGetMatchSnapshotUseCase lifecycleService,
+        IMatchErrorHttpMapper errorHttpMapper)
+    {
+        var result = lifecycleService.GetMatchSnapshot(request?.MatchId, request?.PlayerToken);
+        return result switch
+        {
+            null => throw new InvalidOperationException("Get-snapshot outcome must not be null."),
+            GetMatchSnapshotSucceeded { Response: { Snapshot: { } snapshot } } when IsValidSnapshot(snapshot) => TypedResults.Ok(
+                MatchContractMapper.ToContractSnapshot(snapshot)),
+            GetMatchSnapshotSucceeded => throw new InvalidOperationException(
+                "Get-snapshot success outcome must include a valid snapshot payload."),
+            GetMatchSnapshotFailed { Error: { } error } => errorHttpMapper.MapGetSnapshotFailure(error),
+            GetMatchSnapshotFailed => throw new InvalidOperationException(
+                "Get-snapshot failure outcome must include an error payload."),
+            _ => throw new InvalidOperationException($"Unsupported get-snapshot outcome type: {result.GetType().Name}")
         };
     }
 
@@ -123,7 +144,7 @@ public static class MatchLifecycleEndpoints
             }
         }
 
-        if (!IsValidPresence(snapshot.Presence))
+        if (snapshot.Presence is null || !IsValidPresence(snapshot.Presence))
         {
             return false;
         }
